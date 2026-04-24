@@ -6,6 +6,67 @@
 <title>HyperAds</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
 <script src="https://cdn.tailwindcss.com"></script>
+<!-- ═══ Firebase (Auth + Firestore) ═══ -->
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getFirestore, doc, setDoc, getDoc }
+    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDOTeXf831isooScwnd_g5zl_7kISZidhA",
+    authDomain: "hyper-ads-62835.firebaseapp.com",
+    projectId: "hyper-ads-62835",
+    storageBucket: "hyper-ads-62835.firebasestorage.app",
+    messagingSenderId: "937263735086",
+    appId: "1:937263735086:web:c490be88b5f75ed5a85abf"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  window._fbAuth = auth;
+  window._fbDb = db;
+  window._fbReady = false;
+
+  window._fbGoogleLogin = async () => {
+    try { await signInWithPopup(auth, provider); }
+    catch (e) { window.toast?.('Falha no login: ' + e.message, 'error'); }
+  };
+  window._fbLogoutFull = async () => {
+    try { window.FB?.logout(()=>{}); } catch {}
+    await signOut(auth);
+  };
+  window._fbSave = async (key, valueStr) => {
+    if (!auth.currentUser) return;
+    try {
+      await setDoc(doc(db, 'users', auth.currentUser.uid, 'data', key), {
+        value: valueStr, updatedAt: Date.now()
+      });
+    } catch (e) { console.warn('Firestore save falhou:', key, e.message); }
+  };
+  window._fbLoad = async (key) => {
+    if (!auth.currentUser) return null;
+    try {
+      const snap = await getDoc(doc(db, 'users', auth.currentUser.uid, 'data', key));
+      return snap.exists() ? (snap.data().value ?? null) : null;
+    } catch (e) { console.warn('Firestore load falhou:', key, e.message); return null; }
+  };
+
+  onAuthStateChanged(auth, (user) => {
+    window._fbUser = user ? {
+      uid: user.uid,
+      name: user.displayName || user.email,
+      email: user.email,
+      picture: user.photoURL || ''
+    } : null;
+    window._fbReady = true;
+    if (typeof window.onFbAuthChange === 'function') window.onFbAuthChange(user);
+  });
+</script>
 <style>
 :root { --bg-primary: #ffffff; --bg-secondary: #f4f6f9; --bg-card: #ffffff; --accent: #1a2440; --accent-bright: #d7fa00; --text-primary: #1a2440; --text-secondary: #64748b; --text-muted: #94a3b8; --border: #e2e8f0; --border-light: #f8fafc; --sidebar-bg: #1a2440; --sidebar-text: #cbd5e1; --sidebar-active: #d7fa00; }
 * { box-sizing: border-box; }
@@ -219,7 +280,7 @@ const acctStatus = s => s === 1 ? '🟢' : s === 2 ? '🔴' : s ? '🟡' : '';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let S = {
-  view:'login', sub:'launch',
+  view:'firebaseLogin', sub:'launch',
   apiVersion:'v21.0', token:'', appId:'', profile:null,
   bms:[], personalAccounts:[], selectedAccount:null, pages:[],
   campaigns:[], campaignsLoading:false, campaignToggling:{}, campaignSearch:'', campaignFilter:'all',
@@ -257,6 +318,62 @@ try { S.savedProfiles = JSON.parse(localStorage.getItem('metaAdsProfiles')||'[]'
 try { S.templates = JSON.parse(localStorage.getItem('adTemplates')||'[]'); } catch {}
 try { S.rules = JSON.parse(localStorage.getItem('adRules')||'[]'); } catch {}
 
+// ── Firebase sync layer ────────────────────────────────────────────────────
+const SYNC_KEYS = ['metaAdsProfiles','adTemplates','adRules','globalSettings','darkMode'];
+const _origSetItem = localStorage.setItem.bind(localStorage);
+const _syncTimers = {};
+// Intercept localStorage.setItem: write local immediately, debounce-push to Firestore
+localStorage.setItem = function(key, value) {
+  _origSetItem(key, value);
+  if (!SYNC_KEYS.includes(key)) return;
+  if (!window._fbUser || !window._fbSave) return;
+  clearTimeout(_syncTimers[key]);
+  _syncTimers[key] = setTimeout(() => window._fbSave(key, value), 400);
+};
+
+let _fbLoading = false;
+async function pullFromCloud() {
+  if (!window._fbUser || !window._fbLoad) return;
+  _fbLoading = true; R();
+  try {
+    for (const k of SYNC_KEYS) {
+      const v = await window._fbLoad(k);
+      if (v !== null && v !== undefined) _origSetItem(k, v);
+    }
+    try { S.savedProfiles = JSON.parse(localStorage.getItem('metaAdsProfiles')||'[]'); } catch {}
+    try { S.templates    = JSON.parse(localStorage.getItem('adTemplates')||'[]'); } catch {}
+    try { S.rules        = JSON.parse(localStorage.getItem('adRules')||'[]'); } catch {}
+    S.darkMode = JSON.parse(localStorage.getItem('darkMode')||'false');
+    document.body.classList.toggle('dark', S.darkMode);
+  } catch (e) { console.warn('pullFromCloud erro:', e); }
+  _fbLoading = false;
+}
+
+async function pushAllToCloud() {
+  if (!window._fbUser || !window._fbSave) return;
+  for (const k of SYNC_KEYS) {
+    const v = localStorage.getItem(k);
+    if (v !== null) await window._fbSave(k, v);
+  }
+}
+
+// Auth state bridge
+window.onFbAuthChange = async (user) => {
+  if (user) {
+    // Logou com Google → puxa dados da nuvem, vai para tela de login Meta
+    await pullFromCloud();
+    if (S.view === 'firebaseLogin') S.view = 'login';
+  } else {
+    // Deslogou do Google → reset total
+    Object.assign(S, {
+      view:'firebaseLogin', profile:null, bms:[], personalAccounts:[],
+      selectedAccount:null, campaigns:[], connLogs:[], pixels:[],
+      insights:null, insightsCampaigns:[], token:'', appId:''
+    });
+  }
+  R();
+};
+
 let stopPub = false;
 let _batchUpdate = false;
 
@@ -268,7 +385,7 @@ const R = () => {
   const fselEnd = ae?.selectionEnd;
   const fval = ae?.value;
   const scrollY = a.querySelector('[style*="overflow-y:auto"]')?.scrollTop;
-  a.innerHTML = S.view==='login' ? renderLogin() : renderMain();
+  a.innerHTML = S.view==='firebaseLogin' ? renderFirebaseLogin() : S.view==='login' ? renderLogin() : renderMain();
   if (fid) {
     const el = document.getElementById(fid);
     if (el) {
@@ -318,16 +435,54 @@ const statusBadge = s => {
   return `<span style="font-size:.7rem;font-weight:700;padding:.25rem .75rem;border-radius:99px;background:${bg};color:${color};letter-spacing:.02em;">${s}</span>`;
 };
 
-// ── LOGIN ──────────────────────────────────────────────────────────────────
-function renderLogin() {
-  const ps = S.savedProfiles;
+// ── FIREBASE LOGIN (Google gate) ───────────────────────────────────────────
+function renderFirebaseLogin() {
+  const waiting = !window._fbReady;
   return `<div style="min-height:100vh;background:linear-gradient(160deg,#0f1729 0%,#1a2440 50%,#0f1729 100%);display:flex;align-items:center;justify-content:center;padding:1rem;">
-  <div style="width:100%;max-width:420px;">
+  <div style="width:100%;max-width:400px;">
     <div style="text-align:center;margin-bottom:2.5rem;">
       <div style="width:56px;height:56px;background:#d7fa00;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:900;color:#1a2440;margin:0 auto 1rem;box-shadow:0 8px 24px rgba(215,250,0,.3);">H</div>
       <h1 style="color:white;font-size:1.75rem;font-weight:900;margin:0;letter-spacing:-.02em;">HyperAds</h1>
       <p style="color:#8896ab;font-size:.8rem;margin:.5rem 0 0;letter-spacing:.05em;">META ADS PLATFORM</p>
     </div>
+    <div style="background:white;border-radius:1rem;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,.3);">
+      <div style="padding:1.25rem 1.5rem;background:#1a2440;">
+        <h2 style="font-weight:800;margin:0;color:white;font-size:1.1rem;">Entrar na sua conta</h2>
+        <p style="font-size:.75rem;color:#8896ab;margin:.25rem 0 0;">Seus dados ficam sincronizados na nuvem</p>
+      </div>
+      <div style="padding:1.75rem 1.5rem;display:flex;flex-direction:column;gap:1rem;">
+        <button onclick="window._fbGoogleLogin()" ${waiting?'disabled':''} style="width:100%;background:white;color:#1a2440;border:1.5px solid #e2e8f0;border-radius:.75rem;padding:.85rem;font-weight:700;font-size:.9rem;cursor:${waiting?'wait':'pointer'};display:flex;align-items:center;justify-content:center;gap:.75rem;transition:all .2s;opacity:${waiting?'.5':'1'};" onmouseover="if(!this.disabled){this.style.borderColor='#d7fa00';this.style.background='#fafafa';}" onmouseout="this.style.borderColor='#e2e8f0';this.style.background='white';">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.712A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.712V4.956H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.044l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.956L3.964 7.288C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+          ${waiting ? 'Carregando Firebase...' : 'Entrar com Google'}
+        </button>
+        <p style="font-size:.65rem;color:#94a3b8;text-align:center;margin:0;line-height:1.5;">Ao continuar, suas regras, templates e configurações<br>serão salvos com segurança na nuvem.</p>
+      </div>
+    </div>
+    <p style="text-align:center;color:#8896ab;font-size:.65rem;margin-top:1.5rem;letter-spacing:.04em;">Firebase + Firestore</p>
+  </div></div>`;
+}
+
+// ── LOGIN ──────────────────────────────────────────────────────────────────
+function renderLogin() {
+  const ps = S.savedProfiles;
+  const fu = window._fbUser;
+  const fbHeader = fu ? `
+    <div style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:.75rem;padding:.625rem .875rem;margin-bottom:1rem;display:flex;align-items:center;gap:.625rem;">
+      ${fu.picture?`<img src="${esc(fu.picture)}" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);" onerror="this.style.display='none'"/>`:`<div style="width:28px;height:28px;border-radius:50%;background:#d7fa00;color:#1a2440;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:800;">${esc(fu.name[0]||'?')}</div>`}
+      <div style="flex:1;min-width:0;">
+        <p style="color:white;font-size:.75rem;font-weight:600;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(fu.name)}</p>
+        <p style="color:#8896ab;font-size:.65rem;margin:.1rem 0 0;">Conectado via Google</p>
+      </div>
+      <button onclick="window._fbLogoutFull()" style="background:transparent;border:1px solid rgba(255,255,255,.15);color:#8896ab;font-size:.65rem;padding:.3rem .6rem;border-radius:.4rem;cursor:pointer;white-space:nowrap;" title="Sair da conta Google">Sair</button>
+    </div>` : '';
+  return `<div style="min-height:100vh;background:linear-gradient(160deg,#0f1729 0%,#1a2440 50%,#0f1729 100%);display:flex;align-items:center;justify-content:center;padding:1rem;">
+  <div style="width:100%;max-width:420px;">
+    <div style="text-align:center;margin-bottom:2rem;">
+      <div style="width:56px;height:56px;background:#d7fa00;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:900;color:#1a2440;margin:0 auto 1rem;box-shadow:0 8px 24px rgba(215,250,0,.3);">H</div>
+      <h1 style="color:white;font-size:1.75rem;font-weight:900;margin:0;letter-spacing:-.02em;">HyperAds</h1>
+      <p style="color:#8896ab;font-size:.8rem;margin:.5rem 0 0;letter-spacing:.05em;">META ADS PLATFORM</p>
+    </div>
+    ${fbHeader}
     ${ps.length ? `
     <div style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:1rem;overflow:hidden;margin-bottom:1rem;">
       <div style="padding:1rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.08);">
@@ -374,7 +529,7 @@ function renderLogin() {
         ${S.connLogs.length?`<div style="display:flex;flex-direction:column;gap:.25rem;">${S.connLogs.map(l=>`<div style="font-size:.7rem;padding:.5rem .75rem;border-radius:.5rem;background:${l.t==='error'?'#fef2f2':l.t==='success'?'#f0fdf4':'#f8fafc'};color:${l.t==='error'?'#dc2626':l.t==='success'?'#16a34a':'#64748b'};">${l.t==='error'?'✗':l.t==='success'?'✓':'›'} ${esc(l.m)}</div>`).join('')}</div>`:''}
       </div>
     </div>
-    <p style="text-align:center;color:#8896ab;font-size:.65rem;margin-top:1.5rem;letter-spacing:.04em;">Dados salvos localmente · Batch API</p>
+    <p style="text-align:center;color:#8896ab;font-size:.65rem;margin-top:1.5rem;letter-spacing:.04em;">Dados sincronizados na nuvem · Batch API</p>
   </div></div>`;
 }
 
