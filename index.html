@@ -1108,7 +1108,7 @@ function renderS3() {
   const finalUrl=da.urlParams?`${da.linkUrl||''}${(da.linkUrl||'').includes('?')?'&':'?'}${da.urlParams}`:da.linkUrl||'';
 
   // ── Modo selector (only show options that make sense) ────────────────
-  const showPerCamp=S.nc>1, showPerAdset=S.ns>1&&S.na===1, showMatrix=S.nc>1&&S.ns>1&&S.na===1;
+  const showPerCamp=S.nc>1, showPerAdset=S.ns>1&&S.na===1, showMatrix=S.nc>1&&S.ns>1;
   const modeOptions=showPerCamp||showPerAdset;
   // Auto-reset to single if current mode no longer valid
   if(mode==='per_campaign'&&!showPerCamp){S.creativeMode='single';}
@@ -1434,13 +1434,17 @@ function renderS3() {
     return modeCard+pageModeCard+globalCard+adsetCard+copyCard+adLevelCard;
   }
 
-  // ── Modo PER_CAMPAIGN_ADSET: matriz (cada conjunto de cada campanha) ──
+  // ── Modo PER_CAMPAIGN_ADSET: matriz (campanha × conjunto × anúncio) ──
   if (mode2==='per_campaign_adset') {
     const hasGlobalMedia2=da.imageHash||da.imageUrl||da.videoId;
-    const totalSlots=S.nc*S.ns;
-    const matrixAssigned=Object.values(S.campAdsetCreatives||{}).reduce((s,cr)=>s+(cr&&(cr.videoId||cr.imageUrl||cr.imageHash)?1:0),0);
+    const perAdsetMulti=S.na>1; // quando há múltiplos anúncios por conjunto, matriz 3D
+    const totalSlots=S.nc*S.ns*(perAdsetMulti?S.na:1);
+    // Helper: retorna a chave correta. Se na=1, usa `ci_si`; se na>1, usa `ci_si_ai`.
+    const cellKey=(ci,si,ai)=>perAdsetMulti?`${ci}_${si}_${ai}`:`${ci}_${si}`;
+    const countFilled=()=>{let c=0;for(const k in S.campAdsetCreatives){const cr=S.campAdsetCreatives[k];if(cr&&(cr.videoId||cr.imageUrl||cr.imageHash))c++;}return c;};
+    const matrixAssigned=countFilled();
 
-    const matrixCard=card('Matriz de Criativos',`${matrixAssigned}/${totalSlots} slots preenchidos · ${S.nc} campanhas × ${S.ns} conjuntos`,`
+    const matrixCard=card('Matriz de Criativos',`${matrixAssigned}/${totalSlots} slots preenchidos · ${S.nc} campanhas × ${S.ns} conjuntos${perAdsetMulti?' × '+S.na+' anúncios':''}`,`
     ${!hasGlobalMedia2?`<div style="background:#FEF9C3;border:1px solid #FDE68A;border-radius:.625rem;padding:.75rem;font-size:.75rem;color:#92400E;display:flex;gap:.5rem;margin-bottom:.75rem;">
       <span>⚠️</span><span>Sem criativo padrão. Recomendado: configure um como fallback no modo <strong>Único</strong> para slots vazios.</span>
     </div>`:''}
@@ -1450,34 +1454,64 @@ function renderS3() {
     </div>
     <div style="display:flex;flex-direction:column;gap:.75rem;max-height:600px;overflow-y:auto;">
       ${S.campNames.map((cname,ci)=>{
-        const campSlots=Array.from({length:S.ns},(_,si)=>({ci,si,key:`${ci}_${si}`,cr:S.campAdsetCreatives[`${ci}_${si}`]}));
-        const filledInCamp=campSlots.filter(s=>s.cr&&(s.cr.videoId||s.cr.imageUrl||s.cr.imageHash)).length;
+        let filledInCamp=0;
+        for(let si=0;si<S.ns;si++){
+          if(perAdsetMulti){for(let ai=0;ai<S.na;ai++){const cr=S.campAdsetCreatives[cellKey(ci,si,ai)];if(cr&&(cr.videoId||cr.imageUrl||cr.imageHash))filledInCamp++;}}
+          else{const cr=S.campAdsetCreatives[cellKey(ci,si,0)];if(cr&&(cr.videoId||cr.imageUrl||cr.imageHash))filledInCamp++;}
+        }
+        const campTotal=S.ns*(perAdsetMulti?S.na:1);
         const isExp=S.expandedCampAdset===ci;
         return `<div style="border:1.5px solid ${filledInCamp>0?'var(--border-light)':'var(--border)'};border-radius:.75rem;overflow:hidden;">
           <div onclick="S.expandedCampAdset=${isExp?-1:ci};R()" style="padding:.75rem 1rem;display:flex;align-items:center;gap:.75rem;cursor:pointer;background:${isExp?'rgba(215,250,0,.08)':'var(--bg-card)'};">
             <span style="font-size:.7rem;font-weight:700;background:rgba(215,250,0,.15);color:#1a2440;padding:.25rem .625rem;border-radius:99px;flex-shrink:0;">Camp. ${ci+1}</span>
             <span style="font-size:.85rem;font-weight:600;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(cname)}</span>
-            <span style="font-size:.7rem;color:${filledInCamp>0?'#16A34A':'var(--text-muted)'};font-weight:700;">${filledInCamp}/${S.ns} conjuntos</span>
+            <span style="font-size:.7rem;color:${filledInCamp>0?'#16A34A':'var(--text-muted)'};font-weight:700;">${filledInCamp}/${campTotal} ${perAdsetMulti?'anúncios':'conjuntos'}</span>
             <span style="font-size:.8rem;color:var(--text-muted);">${isExp?'▲':'▼'}</span>
           </div>
           ${isExp?`<div style="padding:.75rem;border-top:1px solid var(--border);background:var(--bg-secondary);">
-            <button onclick="openMediaForCampAdset(${ci},'bulk')" style="width:100%;padding:.5rem;border:1.5px dashed var(--border-light);border-radius:.5rem;background:var(--bg-card);color:#1a2440;font-weight:700;font-size:.75rem;cursor:pointer;margin-bottom:.5rem;">📁 Selecionar ${S.ns} mídias em bulk (distribui nos conjuntos)</button>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.5rem;">
-              ${campSlots.map(s=>{
-                const cr=s.cr;const has=cr&&(cr.videoId||cr.imageUrl||cr.imageHash);
-                return `<div style="border:1.5px solid ${has?'var(--border-light)':'var(--border)'};border-radius:.5rem;overflow:hidden;background:var(--bg-card);">
-                  <div onclick="openMediaForCampAdset(${ci},${s.si})" style="height:64px;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;border:1px solid var(--border);">
-                    ${has&&cr.videoThumb?`<img src="${cr.videoThumb}" style="width:100%;height:100%;object-fit:cover;"/>`:
-                      has&&cr.imageUrl?`<img src="${cr.imageUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
-                      has?'<span style="font-size:1.25rem;">🎬</span>':
-                      '<span style="font-size:1.25rem;color:var(--text-muted);">+</span>'}
-                    ${has?`<span style="position:absolute;top:2px;left:2px;background:${cr.videoId?'var(--accent)':'#F59E0B'};color:white;font-size:.45rem;padding:1px 4px;border-radius:99px;font-weight:700;">${cr.videoId?'VID':'IMG'}</span>`:''}
-                    ${has?`<button onclick="event.stopPropagation();delete S.campAdsetCreatives['${s.key}'];R()" style="position:absolute;top:2px;right:2px;width:16px;height:16px;background:rgba(239,68,68,.9);border:none;border-radius:50%;color:white;font-size:.55rem;cursor:pointer;line-height:14px;padding:0;">×</button>`:''}
+            <button onclick="openMediaForCampAdset(${ci},'bulk')" style="width:100%;padding:.5rem;border:1.5px dashed var(--border-light);border-radius:.5rem;background:var(--bg-card);color:#1a2440;font-weight:700;font-size:.75rem;cursor:pointer;margin-bottom:.75rem;">📁 Selecionar ${campTotal} mídias em bulk (distribui em toda a campanha)</button>
+            ${Array.from({length:S.ns},(_,si)=>{
+              // Linha por conjunto
+              if(!perAdsetMulti){
+                // na=1: apenas uma célula por conjunto (comportamento anterior)
+                const k=cellKey(ci,si,0);const cr=S.campAdsetCreatives[k];
+                const has=cr&&(cr.videoId||cr.imageUrl||cr.imageHash);
+                return `<div style="display:inline-block;width:110px;margin:0 .25rem .5rem 0;vertical-align:top;">
+                  <div style="border:1.5px solid ${has?'var(--border-light)':'var(--border)'};border-radius:.5rem;overflow:hidden;background:var(--bg-card);">
+                    <div onclick="openMediaForCampAdset(${ci},${si})" style="height:64px;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;">
+                      ${has&&cr.videoThumb?`<img src="${cr.videoThumb}" style="width:100%;height:100%;object-fit:cover;"/>`:has&&cr.imageUrl?`<img src="${cr.imageUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:has?'<span style="font-size:1.25rem;">🎬</span>':'<span style="font-size:1.25rem;color:var(--text-muted);">+</span>'}
+                      ${has?`<span style="position:absolute;top:2px;left:2px;background:${cr.videoId?'var(--accent)':'#F59E0B'};color:white;font-size:.45rem;padding:1px 4px;border-radius:99px;font-weight:700;">${cr.videoId?'VID':'IMG'}</span>`:''}
+                      ${has?`<button onclick="event.stopPropagation();delete S.campAdsetCreatives['${k}'];R()" style="position:absolute;top:2px;right:2px;width:16px;height:16px;background:rgba(239,68,68,.9);border:none;border-radius:50%;color:white;font-size:.55rem;cursor:pointer;line-height:14px;padding:0;">×</button>`:''}
+                    </div>
+                    <p style="font-size:.6rem;font-weight:700;color:${has?'#1a2440':'var(--text-muted)'};margin:0;text-align:center;padding:.25rem;">Conj. ${si+1}</p>
                   </div>
-                  <p style="font-size:.6rem;font-weight:700;color:${has?'#1a2440':'var(--text-muted)'};margin:0;text-align:center;padding:.25rem;">Conj. ${s.si+1}</p>
                 </div>`;
-              }).join('')}
-            </div>
+              }
+              // na>1: grupo de anúncios por conjunto com botão bulk do conjunto
+              let filledInSet=0;
+              for(let ai=0;ai<S.na;ai++){const c=S.campAdsetCreatives[cellKey(ci,si,ai)];if(c&&(c.videoId||c.imageUrl||c.imageHash))filledInSet++;}
+              return `<div style="border:1.5px solid var(--border);border-radius:.5rem;padding:.5rem;margin-bottom:.5rem;background:var(--bg-card);">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.375rem;gap:.5rem;">
+                  <span style="font-size:.7rem;font-weight:700;color:#1a2440;background:rgba(215,250,0,.15);padding:.125rem .5rem;border-radius:99px;">Conj. ${si+1}</span>
+                  <span style="font-size:.65rem;color:${filledInSet>0?'#16A34A':'var(--text-muted)'};font-weight:700;">${filledInSet}/${S.na} ads</span>
+                  <button onclick="openMediaForCampAdset(${ci},'bulk_${si}')" style="font-size:.6rem;padding:.25rem .5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:.375rem;color:#1a2440;cursor:pointer;font-weight:600;">📁 Bulk ${S.na} ads</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:.375rem;">
+                  ${Array.from({length:S.na},(_,ai)=>{
+                    const k=cellKey(ci,si,ai);const cr=S.campAdsetCreatives[k];
+                    const has=cr&&(cr.videoId||cr.imageUrl||cr.imageHash);
+                    return `<div style="border:1.5px solid ${has?'var(--border-light)':'var(--border)'};border-radius:.5rem;overflow:hidden;background:var(--bg-card);">
+                      <div onclick="openMediaForCampAdsetAd(${ci},${si},${ai})" style="height:56px;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;">
+                        ${has&&cr.videoThumb?`<img src="${cr.videoThumb}" style="width:100%;height:100%;object-fit:cover;"/>`:has&&cr.imageUrl?`<img src="${cr.imageUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:has?'<span style="font-size:1.1rem;">🎬</span>':'<span style="font-size:1.1rem;color:var(--text-muted);">+</span>'}
+                        ${has?`<span style="position:absolute;top:2px;left:2px;background:${cr.videoId?'var(--accent)':'#F59E0B'};color:white;font-size:.4rem;padding:1px 3px;border-radius:99px;font-weight:700;">${cr.videoId?'VID':'IMG'}</span>`:''}
+                        ${has?`<button onclick="event.stopPropagation();delete S.campAdsetCreatives['${k}'];R()" style="position:absolute;top:2px;right:2px;width:14px;height:14px;background:rgba(239,68,68,.9);border:none;border-radius:50%;color:white;font-size:.5rem;cursor:pointer;line-height:12px;padding:0;">×</button>`:''}
+                      </div>
+                      <p style="font-size:.55rem;font-weight:700;color:${has?'#1a2440':'var(--text-muted)'};margin:0;text-align:center;padding:.2rem;">Ad ${ai+1}</p>
+                    </div>`;
+                  }).join('')}
+                </div>
+              </div>`;
+            }).join('')}
           </div>`:''}
         </div>`;
       }).join('')}
@@ -2112,14 +2146,23 @@ function openMediaForAdset(i) { S.mediaSelectTarget={type:'adset',index:i}; medi
 function openMediaForAds() { S.mediaSelectTarget='ads'; mediaFolder=null; mediaSearch=''; mediaMultiSelect=true; mediaSelected=[]; _openMediaModal(); }
 function openMediaForAd(i) { S.mediaSelectTarget={type:'ad',index:i}; mediaFolder=null; mediaSearch=''; mediaMultiSelect=false; mediaSelected=[]; _openMediaModal(); }
 function openMediaForCampAdset(ci,si) {
-  // si can be a number (single adset slot) or 'bulk' (multi-select for this campaign)
+  // si can be: number (single adset slot) | 'bulk' (whole campaign) | 'bulk_N' (one adset with N ads)
   if(si==='bulk'){
     S.mediaSelectTarget={type:'camp_adset_bulk',ci};
+    mediaFolder=null;mediaSearch='';mediaMultiSelect=true;mediaSelected=[];
+  }else if(typeof si==='string'&&si.startsWith('bulk_')){
+    const sIdx=parseInt(si.replace('bulk_',''));
+    S.mediaSelectTarget={type:'camp_adset_bulk_set',ci,si:sIdx};
     mediaFolder=null;mediaSearch='';mediaMultiSelect=true;mediaSelected=[];
   }else{
     S.mediaSelectTarget={type:'camp_adset',ci,si};
     mediaFolder=null;mediaSearch='';mediaMultiSelect=false;mediaSelected=[];
   }
+  _openMediaModal();
+}
+function openMediaForCampAdsetAd(ci,si,ai) {
+  S.mediaSelectTarget={type:'camp_adset_ad',ci,si,ai};
+  mediaFolder=null;mediaSearch='';mediaMultiSelect=false;mediaSelected=[];
   _openMediaModal();
 }
 function toggleMediaSelect(type,id,url,hash,thumb,title) {
@@ -2137,12 +2180,31 @@ function confirmMultiSelect() {
     S.adCreatives=Array.from({length:S.na},(_,i)=>{const m=mediaSelected[i%mediaSelected.length];return m?makeCr(m):null;});
     closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.na} anúncios`,'success');R();
   } else if(target&&typeof target==='object'&&target.type==='camp_adset_bulk'){
-    const ci=target.ci;
+    // Distribui em toda a campanha (todos os conjuntos × anúncios se na>1)
+    const ci=target.ci;const perAd=S.na>1;
+    let idx=0;
     for(let si=0;si<S.ns;si++){
-      const m=mediaSelected[si%mediaSelected.length];
-      if(m)S.campAdsetCreatives[`${ci}_${si}`]=makeCr(m);
+      if(perAd){
+        for(let ai=0;ai<S.na;ai++){
+          const m=mediaSelected[idx%mediaSelected.length];
+          if(m)S.campAdsetCreatives[`${ci}_${si}_${ai}`]=makeCr(m);
+          idx++;
+        }
+      }else{
+        const m=mediaSelected[si%mediaSelected.length];
+        if(m)S.campAdsetCreatives[`${ci}_${si}`]=makeCr(m);
+      }
     }
-    closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.ns} conjuntos da Camp. ${ci+1}`,'success');R();
+    const total=S.ns*(perAd?S.na:1);
+    closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${total} slots da Camp. ${ci+1}`,'success');R();
+  } else if(target&&typeof target==='object'&&target.type==='camp_adset_bulk_set'){
+    // Distribui nos N anúncios de um conjunto específico
+    const {ci,si}=target;
+    for(let ai=0;ai<S.na;ai++){
+      const m=mediaSelected[ai%mediaSelected.length];
+      if(m)S.campAdsetCreatives[`${ci}_${si}_${ai}`]=makeCr(m);
+    }
+    closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.na} anúncios do Conj. ${si+1}`,'success');R();
   } else {
     S.adsetCreatives=Array.from({length:S.ns},(_,i)=>{const m=mediaSelected[i%mediaSelected.length];return m?makeCr(m):null;});
     closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.ns} conjuntos`,'success');R();
@@ -2345,6 +2407,13 @@ function selectMedia(type,id,urlOrThumb,titleOrHash) {
   }
   if(target&&typeof target==='object'&&target.type==='camp_adset'){
     const key=`${target.ci}_${target.si}`;
+    S.campAdsetCreatives[key]=type==='video'
+      ?{mediaType:'video',videoId:id,videoThumb:urlOrThumb,imageUrl:'',imageHash:''}
+      :{mediaType:'image',imageUrl:urlOrThumb,imageHash:titleOrHash,videoId:'',videoThumb:''};
+    S.mediaSelectTarget=null;closeMedia();R();return;
+  }
+  if(target&&typeof target==='object'&&target.type==='camp_adset_ad'){
+    const key=`${target.ci}_${target.si}_${target.ai}`;
     S.campAdsetCreatives[key]=type==='video'
       ?{mediaType:'video',videoId:id,videoThumb:urlOrThumb,imageUrl:'',imageHash:''}
       :{mediaType:'image',imageUrl:urlOrThumb,imageHash:titleOrHash,videoId:'',videoThumb:''};
@@ -2879,16 +2948,21 @@ async function startPub(){
 
     const perAdMedia=S.adMediaMode==='per_ad'&&na>1;
     const perAdCopy=S.adCopyMode==='per_ad'&&na>1;
+    const matrixPerAd=mode==='per_campaign_adset'&&na>1; // matriz com granularidade por anúncio
     const crq=[],crm=[];
     aids.forEach((id,i)=>{
       if(!id)return;
       const {ci,si}=am[i],cleanUrl=da.linkUrl;
-      const campCr=mode==='per_campaign'?S.campaignCreatives[ci]:mode==='per_adset'?S.adsetCreatives[si]:mode==='per_campaign_adset'?S.campAdsetCreatives[`${ci}_${si}`]:null;
-      const effPageId=(S.pageMode==='per_campaign'&&S.campaignPages[ci])||da.pageId;
-      const adCount=perAdMedia||perAdCopy?na:1;
+      const adCount=perAdMedia||perAdCopy||matrixPerAd?na:1;
 
       for(let a=0;a<adCount;a++){
-        // Media: per-ad override > campaign/adset override > global
+        // Resolve matrix cell per ad when applicable
+        const matrixCr=mode==='per_campaign_adset'
+          ? (matrixPerAd ? S.campAdsetCreatives[`${ci}_${si}_${a}`] : S.campAdsetCreatives[`${ci}_${si}`])
+          : null;
+        const campCr=mode==='per_campaign'?S.campaignCreatives[ci]:mode==='per_adset'?S.adsetCreatives[si]:matrixCr;
+        const effPageId=(S.pageMode==='per_campaign'&&S.campaignPages[ci])||da.pageId;
+        // Media: per-ad override > matrix/campaign/adset override > global
         const adCr=perAdMedia?S.adCreatives[a]:null;
         const effHash=adCr?.imageHash||campCr?.imageHash||da.imageHash;
         const effImgUrl=adCr?.imageUrl||campCr?.imageUrl||da.imageUrl;
@@ -2924,20 +2998,20 @@ async function startPub(){
       const p=parseBatch(r);
       const {ai,ci,si,adIdx}=crm[idx];
       if(!p.error){
-        if(perAdMedia||perAdCopy){
+        if(perAdMedia||perAdCopy||matrixPerAd){
           if(!crid_multi[ai])crid_multi[ai]=[];
           crid_multi[ai][adIdx]=p.id;
         }else{
           crid[ai]=p.id;
         }
-      }else{plog(`  ✗ Creative C${ci+1}S${si+1}${(perAdMedia||perAdCopy)?'A'+(adIdx+1):''}: ${p.error.message}`,'error');}
+      }else{plog(`  ✗ Creative C${ci+1}S${si+1}${(perAdMedia||perAdCopy||matrixPerAd)?'A'+(adIdx+1):''}: ${p.error.message}`,'error');}
     });
     plog(`  ${Object.keys(crid).length+Object.keys(crid_multi).length} adsets com criativos criados`,'info');
     if(stopPub)throw new Error('stop');
 
     plog('━━ FASE 4/4 — anúncios','loading');
     const aq=[];
-    if(perAdMedia||perAdCopy){
+    if(perAdMedia||perAdCopy||matrixPerAd){
       // Each ad gets its own creative
       Object.entries(crid_multi).forEach(([ai,crIds])=>{
         const adid=aids[+ai],{ci,si}=am[+ai];
