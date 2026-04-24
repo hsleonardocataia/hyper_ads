@@ -235,7 +235,7 @@ let S = {
   adMediaMode:'single', adCreatives:[], adCopyMode:'single', adCopies:[],
   pageMode:'single', campaignPages:[],
   cc:{ objective:'OUTCOME_SALES', specialCat:'Nenhuma', cbo:false, cboBudgetType:'daily_budget', cboBudget:'', status:'PAUSED', bidStrategy:'LOWEST_COST_WITHOUT_CAP', bidAmount:'' },
-  ds:{ budgetType:'daily_budget', budget:'', startTime:'', endTime:'', convLocation:'WEBSITE', pixelId:'', customEventType:'PURCHASE', ageMin:18, ageMax:65, genders:'all', countries:'US', detailedTargeting:'', placementMode:'auto', advantageAudience:true },
+  ds:{ budgetType:'daily_budget', budget:'', bidAmount:'', startTime:'', endTime:'', convLocation:'WEBSITE', pixelId:'', customEventType:'PURCHASE', ageMin:18, ageMax:65, genders:'all', countries:'US', detailedTargeting:'', placementMode:'auto', advantageAudience:true },
   adsetPrefix:'AdSet',
   da:{ name:'', pageId:'', pageName:'', mediaType:'image', imageUrl:'', imageHash:'', videoId:'', videoThumb:'', videoTitle:'', primaryTexts:[''], headlines:[''], linkUrl:'', urlParams:'utm_source=facebook&utm_medium={{placement}}&utm_campaign={{campaign.name}}&utm_content={{adset.name}}', cta:'SHOP_NOW' },
   pubLog:[], pubRunning:false, pubFinished:false, pubDone:0, pubTotal:0, pubErrors:[],
@@ -1044,7 +1044,11 @@ function renderS1() {
 }
 
 function renderS2() {
-  const ds=S.ds;
+  const ds=S.ds, cc=S.cc;
+  const useCbo=cc.cbo;
+  const bidStrat=cc.bidStrategy||'LOWEST_COST_WITHOUT_CAP';
+  const hasBidCap=bidStrat==='LOWEST_COST_WITH_BID_CAP'||bidStrat==='COST_CAP';
+  const hasMinRoas=bidStrat==='LOWEST_COST_WITH_MIN_ROAS';
   const pixelField=`<div>
     <label style="display:block;font-size:.7rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.375rem;">Pixel</label>
     ${S.pixels.length?`
@@ -1070,11 +1074,14 @@ function renderS2() {
     <div style="font-size:.75rem;color:var(--text-muted);background:var(--bg-secondary);border:1px solid var(--border);border-radius:.5rem;padding:.625rem .875rem;white-space:nowrap;font-family:monospace;">${esc(S.adsetPrefix)} ${esc(S.campNames[0]||'Camp 01')} — 001</div>
   </div>`)}
   ${card('Configurações dos Conjuntos','Aplicadas a todos os conjuntos',`
+  ${useCbo?`<div style="background:rgba(215,250,0,.08);border:1px solid rgba(215,250,0,.3);border-radius:.625rem;padding:.625rem .875rem;font-size:.75rem;color:#1a2440;"><strong>ℹ️ Orçamento no nível da campanha (CBO)</strong> — os conjuntos não precisam de budget individual.</div>`:''}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:.875rem;">
     ${sel('Local de conversão','ds-conv',[['WEBSITE','Site'],['APP','App'],['MESSENGER','Messenger'],['WHATSAPP','WhatsApp'],['PHONE_CALL','Ligação']],ds.convLocation,"S.ds.convLocation=this.value")}
     ${pixelField}
-    ${sel('Tipo de orçamento','ds-btype',[['daily_budget','Diário'],['lifetime_budget','Total']],ds.budgetType,"S.ds.budgetType=this.value")}
-    ${inp('Valor (USD)','ds-budget','number','50',ds.budget,"S.ds.budget=this.value")}
+    ${!useCbo?sel('Tipo de orçamento','ds-btype',[['daily_budget','Diário'],['lifetime_budget','Total']],ds.budgetType,"S.ds.budgetType=this.value"):''}
+    ${!useCbo?inp('Valor (USD)','ds-budget','number','50',ds.budget,"S.ds.budget=this.value"):''}
+    ${hasBidCap?inp(bidStrat==='COST_CAP'?'Custo máx. por resultado ($)':'Lance máx. por resultado ($)','ds-bidamount','number','5.00',ds.bidAmount,"S.ds.bidAmount=this.value"):''}
+    ${hasMinRoas?inp('ROAS mínimo (ex: 2.5)','ds-bidamount','number','2.5',ds.bidAmount,"S.ds.bidAmount=this.value"):''}
     <div>${inp('Início','ds-start','datetime-local','',ds.startTime,"S.ds.startTime=this.value")}
     <p style="font-size:.6rem;color:var(--accent);margin:.25rem 0 0;font-weight:600;">Fuso: ${esc(S.selectedAccount?.timezone_name||'Não disponível')}</p></div>
     <div>${inp('Fim (opcional)','ds-end','datetime-local','',ds.endTime,"S.ds.endTime=this.value")}
@@ -2419,6 +2426,11 @@ function validateStep(n){
     if(!S.cc.cbo&&(!S.ds.budget||parseFloat(S.ds.budget)<1))errs.push('Orçamento mínimo: $1/dia.');
     if(S.cc.objective==='OUTCOME_SALES'&&!S.ds.pixelId)errs.push('Pixel obrigatório para objetivo Vendas.');
     if(!S.ds.countries.trim())errs.push('Informe pelo menos um país.');
+    const bs=S.cc.bidStrategy||'LOWEST_COST_WITHOUT_CAP';
+    if(bs!=='LOWEST_COST_WITHOUT_CAP'){
+      const eff=S.ds.bidAmount||S.cc.bidAmount;
+      if(!eff||parseFloat(eff)<=0)errs.push('Informe o valor do lance/custo/ROAS (estratégia '+bs+' requer valor).');
+    }
   }
   if(n===3){
     if(S.pageMode==='per_campaign'&&S.nc>1){
@@ -2823,13 +2835,13 @@ async function startPub(){
         const og=OBJ_OPTIM[cc.objective],dt=OBJ_DEST[cc.objective];
         const bidStrategy=cc.bidStrategy||'LOWEST_COST_WITHOUT_CAP';
         const b={name:`${S.adsetPrefix} ${S.campNames[ci]||`C${ci+1}`} — ${String(si+1).padStart(3,'0')}`.slice(0,255),campaign_id:cid,billing_event:OBJ_BILLING[cc.objective],optimization_goal:og,bid_strategy:bidStrategy,status:cc.status,targeting:tg,...(dt!=='UNDEFINED'?{destination_type:dt}:{}),...(og==='OFFSITE_CONVERSIONS'?{attribution_spec:JSON.stringify([{event_type:'CLICK_THROUGH',window_days:7}])}:{})};
-        // Bid cap / Cost cap: bid_amount em centavos
-        if((bidStrategy==='LOWEST_COST_WITH_BID_CAP'||bidStrategy==='COST_CAP')&&cc.bidAmount){
-          b.bid_amount=Math.round(parseFloat(cc.bidAmount)*100);
+        // Bid amount: prefer adset-level (ds.bidAmount), fallback to campaign-level (cc.bidAmount)
+        const effBidAmount=ds.bidAmount||cc.bidAmount;
+        if((bidStrategy==='LOWEST_COST_WITH_BID_CAP'||bidStrategy==='COST_CAP')&&effBidAmount){
+          b.bid_amount=Math.round(parseFloat(effBidAmount)*100);
         }
-        // Min ROAS: bid_amount como float (ex: 2.5 → 2500 permille? não, é 0-1000 format: 2.5 = 2500 * 0.001). Na Marketing API o campo é bid_amount em permille: ROAS 2.5 → 2500
-        if(bidStrategy==='LOWEST_COST_WITH_MIN_ROAS'&&cc.bidAmount){
-          b.bid_amount=Math.round(parseFloat(cc.bidAmount)*1000);
+        if(bidStrategy==='LOWEST_COST_WITH_MIN_ROAS'&&effBidAmount){
+          b.bid_amount=Math.round(parseFloat(effBidAmount)*1000);
         }
         if(!cc.cbo&&ds.budget)b[ds.budgetType]=Math.max(100,Math.round(parseFloat(ds.budget)*100));
         if(ds.startTime)b.start_time=ds.startTime+':00';
