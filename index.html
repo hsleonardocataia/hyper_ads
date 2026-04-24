@@ -1108,7 +1108,7 @@ function renderS3() {
   const finalUrl=da.urlParams?`${da.linkUrl||''}${(da.linkUrl||'').includes('?')?'&':'?'}${da.urlParams}`:da.linkUrl||'';
 
   // ── Modo selector (only show options that make sense) ────────────────
-  const showPerCamp=S.nc>1, showPerAdset=S.ns>1&&S.na===1, showMatrix=S.nc>1&&S.ns>1;
+  const showPerCamp=S.nc>1, showPerAdset=S.ns>1&&S.na===1, showMatrix=[S.nc>1,S.ns>1,S.na>1].filter(Boolean).length>=2;
   const modeOptions=showPerCamp||showPerAdset;
   // Auto-reset to single if current mode no longer valid
   if(mode==='per_campaign'&&!showPerCamp){S.creativeMode='single';}
