@@ -203,6 +203,27 @@ const OBJ_OPTIM  = { OUTCOME_SALES:'OFFSITE_CONVERSIONS', OUTCOME_TRAFFIC:'LINK_
 const OBJ_DEST   = { OUTCOME_SALES:'WEBSITE', OUTCOME_TRAFFIC:'WEBSITE', OUTCOME_LEADS:'WEBSITE', OUTCOME_ENGAGEMENT:'UNDEFINED', OUTCOME_AWARENESS:'UNDEFINED' };
 const CTA_OPTIONS = ['SHOP_NOW','LEARN_MORE','GET_OFFER','ORDER_NOW','SIGN_UP','WATCH_MORE','CONTACT_US','SUBSCRIBE','DOWNLOAD','APPLY_NOW','GET_QUOTE','SEND_MESSAGE','CALL_NOW'];
 const BULK_STEPS = ['Estrutura','Campanha','Conjunto','Anúncio','Revisar','Publicar'];
+// Retorna a lista dinâmica de steps. Quando editAdsPerAdset está ativo e ns>1,
+// expande "Anúncio" em N steps (um por conjunto).
+function getDynamicSteps(){
+  if(S.editAdsPerAdset&&S.ns>1){
+    const adSteps=Array.from({length:S.ns},(_,i)=>`Anúncio Conj ${i+1}`);
+    return ['Estrutura','Campanha','Conjunto',...adSteps,'Revisar','Publicar'];
+  }
+  return BULK_STEPS;
+}
+// Retorna { type: 'estrutura'|'campanha'|'conjunto'|'anuncio'|'revisar'|'publicar', adsetIdx: number }
+function getStepInfo(idx){
+  const types=['estrutura','campanha','conjunto'];
+  if(idx<3)return {type:types[idx],adsetIdx:-1};
+  if(S.editAdsPerAdset&&S.ns>1){
+    const adEnd=3+S.ns;
+    if(idx<adEnd)return {type:'anuncio',adsetIdx:idx-3};
+    if(idx===adEnd)return {type:'revisar',adsetIdx:-1};
+    return {type:'publicar',adsetIdx:-1};
+  }
+  return {type:['anuncio','revisar','publicar'][idx-3]||'publicar',adsetIdx:-1};
+}
 const NAV = [
   { id:'dashboard', icon:'📈', label:'Dashboard' },
   { id:'launch',    icon:'⚡', label:'Lançar' },
@@ -232,6 +253,7 @@ let S = {
   expandedCampaign:-1,
   mediaSelectTarget:null,
   creativeMode:'single', adsetCreatives:[], campAdsetCreatives:{}, expandedCampAdset:-1,
+  editAdsPerAdset:false, adsetAds:{},
   adMediaMode:'single', adCreatives:[], adCopyMode:'single', adCopies:[],
   pageMode:'single', campaignPages:[],
   cc:{ objective:'OUTCOME_SALES', specialCat:'Nenhuma', cbo:false, cboBudgetType:'daily_budget', cboBudget:'', status:'PAUSED', bidStrategy:'LOWEST_COST_WITHOUT_CAP', bidAmount:'' },
@@ -955,21 +977,33 @@ function renderShopifyTab(mcard){
 
 // ── LAUNCH ─────────────────────────────────────────────────────────────────
 function renderLaunch() {
-  const steps=[renderS0(),renderS1(),renderS2(),renderS3(),renderS4(),renderS5()];
+  const dynSteps=getDynamicSteps();
+  // Clamp bulkStep to valid range
+  if(S.bulkStep>=dynSteps.length)S.bulkStep=dynSteps.length-1;
+  const info=getStepInfo(S.bulkStep);
+  let stepContent;
+  switch(info.type){
+    case 'estrutura':stepContent=renderS0();break;
+    case 'campanha':stepContent=renderS1();break;
+    case 'conjunto':stepContent=renderS2();break;
+    case 'anuncio':stepContent=renderS3(info.adsetIdx);break;
+    case 'revisar':stepContent=renderS4();break;
+    case 'publicar':stepContent=renderS5();break;
+  }
   const total=(S.nc*S.ns*S.na).toLocaleString();
   return `<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
   <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);background:var(--bg-primary);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
     <div><h2 style="font-weight:700;font-size:1.125rem;margin:0;color:var(--text-primary);">Lançamento em Massa</h2>
     <p style="font-size:.75rem;color:var(--text-muted);margin:.125rem 0 0;">Batch API · ${total} anúncios</p></div>
-    <div style="display:flex;gap:.25rem;background:var(--border-light);border-radius:.75rem;padding:.25rem;">
-      ${BULK_STEPS.map((s,i)=>`<button onclick="${i<S.bulkStep?`setBulkStep(${i})`:''}" style="display:flex;align-items:center;gap:.375rem;padding:.375rem .625rem;border-radius:.5rem;border:none;font-size:.75rem;font-weight:600;cursor:${i<S.bulkStep?'pointer':'default'};background:${i===S.bulkStep?'white':'transparent'};color:${i===S.bulkStep?'#1a2440':i<S.bulkStep?'#16A34A':'#94A3B8'};box-shadow:${i===S.bulkStep?'0 1px 3px rgba(0,0,0,.1)':'none'};">${i<S.bulkStep?'✓':`<span style="width:16px;height:16px;border-radius:50%;background:${i===S.bulkStep?'#1a2440':'var(--border)'};color:${i===S.bulkStep?'white':'#94A3B8'};display:inline-flex;align-items:center;justify-content:center;font-size:.625rem;">${i+1}</span>`}${s}</button>`).join('')}
+    <div style="display:flex;gap:.25rem;background:var(--border-light);border-radius:.75rem;padding:.25rem;overflow-x:auto;max-width:70%;">
+      ${dynSteps.map((s,i)=>`<button onclick="${i<S.bulkStep?`setBulkStep(${i})`:''}" style="display:flex;align-items:center;gap:.375rem;padding:.375rem .625rem;border-radius:.5rem;border:none;font-size:.7rem;font-weight:600;cursor:${i<S.bulkStep?'pointer':'default'};background:${i===S.bulkStep?'white':'transparent'};color:${i===S.bulkStep?'#1a2440':i<S.bulkStep?'#16A34A':'#94A3B8'};box-shadow:${i===S.bulkStep?'0 1px 3px rgba(0,0,0,.1)':'none'};white-space:nowrap;flex-shrink:0;">${i<S.bulkStep?'✓':`<span style="width:16px;height:16px;border-radius:50%;background:${i===S.bulkStep?'#1a2440':'var(--border)'};color:${i===S.bulkStep?'white':'#94A3B8'};display:inline-flex;align-items:center;justify-content:center;font-size:.625rem;">${i+1}</span>`}${s}</button>`).join('')}
     </div>
   </div>
-  <div style="flex:1;overflow-y:auto;padding:1.5rem;"><div style="max-width:800px;margin:0 auto;">${steps[S.bulkStep]}</div></div>
+  <div style="flex:1;overflow-y:auto;padding:1.5rem;"><div style="max-width:800px;margin:0 auto;">${stepContent}</div></div>
   <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);background:var(--bg-card);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
     <button onclick="setBulkStep(${Math.max(0,S.bulkStep-1)})" ${S.bulkStep===0?'disabled':''} style="padding:.625rem 1.25rem;border:1.5px solid var(--border);border-radius:.75rem;background:var(--bg-card);color:var(--text-secondary);font-weight:600;font-size:.875rem;cursor:${S.bulkStep===0?'default':'pointer'};opacity:${S.bulkStep===0?'.4':'1'};">← Anterior</button>
-    <span style="font-size:.75rem;color:var(--text-muted);">${S.bulkStep+1} / ${BULK_STEPS.length}</span>
-    ${S.bulkStep<BULK_STEPS.length-1?`<button onclick="nextStep()" style="padding:.625rem 1.5rem;border:none;border-radius:.75rem;background:var(--accent);color:white;font-weight:700;font-size:.875rem;cursor:pointer;" onmouseover="this.style.background='#0f1729'" onmouseout="this.style.background='#1a2440'">Próximo →</button>`:''}
+    <span style="font-size:.75rem;color:var(--text-muted);">${S.bulkStep+1} / ${dynSteps.length}</span>
+    ${S.bulkStep<dynSteps.length-1?`<button onclick="nextStep()" style="padding:.625rem 1.5rem;border:none;border-radius:.75rem;background:var(--accent);color:white;font-weight:700;font-size:.875rem;cursor:pointer;" onmouseover="this.style.background='#0f1729'" onmouseout="this.style.background='#1a2440'">Próximo →</button>`:''}
   </div></div>`;
 }
 
@@ -1099,11 +1133,14 @@ function renderS2() {
       <button onclick="S.ds.placementMode='${v}';R()" style="flex:1;padding:.625rem;border-radius:.625rem;border:2px solid ${ds.placementMode===v?'#1a2440':'var(--border)'};background:${ds.placementMode===v?'#EEF2FF':'white'};color:${ds.placementMode===v?'#1a2440':'#64748B'};font-weight:600;font-size:.8rem;cursor:pointer;">${l}</button>`).join('')}
     </div>
   </div>
-  ${tog(ds.advantageAudience,"S.ds.advantageAudience=!S.ds.advantageAudience;R()","Advantage+ Audience","Meta expande automaticamente o público além do targeting definido")}`)}`;
+  ${tog(ds.advantageAudience,"S.ds.advantageAudience=!S.ds.advantageAudience;R()","Advantage+ Audience","Meta expande automaticamente o público além do targeting definido")}
+  ${S.ns>1?tog(S.editAdsPerAdset,"S.editAdsPerAdset=!S.editAdsPerAdset;R()","Editar anúncios por conjunto","Gera "+S.ns+" janelas separadas de edição (1 por conjunto) em vez de uma única tela"):''}`)}`;
 }
 
 // ── S3 — Anúncio (com modo de criativos) ──────────────────────────────────
-function renderS3() {
+function renderS3(adsetIdx=-1) {
+  // Modo "por conjunto separado" — edita anúncios de 1 conjunto específico
+  if(adsetIdx>=0&&S.editAdsPerAdset)return renderS3ForAdset(adsetIdx);
   const da=S.da, mode=S.creativeMode||'single';
   const finalUrl=da.urlParams?`${da.linkUrl||''}${(da.linkUrl||'').includes('?')?'&':'?'}${da.urlParams}`:da.linkUrl||'';
 
@@ -1598,6 +1635,82 @@ function renderS3() {
   }).join('')}`);
 
   return modeCard+pageModeCard+globalCard+perCampCard+adLevelCard;
+}
+
+// Render da tela de anúncios por conjunto específico (modo editAdsPerAdset)
+function renderS3ForAdset(si){
+  const da=S.da;
+  if(!S.adsetAds[si])S.adsetAds[si]={ads:Array.from({length:S.na},()=>({mediaType:'image',imageUrl:'',imageHash:'',videoId:'',videoThumb:'',primaryText:'',headline:''})),pageId:'',pageName:''};
+  const conf=S.adsetAds[si];
+  // Ajusta tamanho do array ads se na mudou
+  if(conf.ads.length!==S.na){
+    const old=conf.ads;
+    conf.ads=Array.from({length:S.na},(_,i)=>old[i]||{mediaType:'image',imageUrl:'',imageHash:'',videoId:'',videoThumb:'',primaryText:'',headline:''});
+  }
+  const filled=conf.ads.filter(a=>a.videoId||a.imageUrl||a.imageHash).length;
+
+  // Copy shortcut button
+  const copyFromAdset=si>0?`<button onclick="S.adsetAds[${si}]=JSON.parse(JSON.stringify(S.adsetAds[${si-1}]||{ads:[],pageId:'',pageName:''}));R()" style="padding:.375rem .75rem;background:var(--border-light);color:#1a2440;border:1.5px solid var(--border);border-radius:.5rem;font-size:.7rem;font-weight:600;cursor:pointer;">📋 Copiar do Conj. ${si}</button>`:'';
+
+  return `<div style="margin-bottom:1rem;background:rgba(215,250,0,.08);border:1px solid rgba(215,250,0,.3);border-radius:.625rem;padding:.75rem 1rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
+    <div>
+      <p style="font-size:.7rem;color:var(--text-muted);margin:0;text-transform:uppercase;font-weight:700;letter-spacing:.06em;">Editando</p>
+      <p style="font-size:1rem;font-weight:800;color:#1a2440;margin:.125rem 0 0;">Conjunto ${si+1} de ${S.ns} · ${S.na} anúncios</p>
+    </div>
+    ${copyFromAdset}
+  </div>
+  ${card('Página do Facebook','Usada para todos os anúncios deste conjunto',`
+  ${S.pages.length?`
+  <select onchange="const p=S.pages.find(x=>x.id===this.value);S.adsetAds[${si}].pageId=this.value;S.adsetAds[${si}].pageName=p?p.name:'';"
+    style="width:100%;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.875rem;outline:none;background:var(--bg-card);">
+    <option value="">${da.pageId?'↳ Usar página padrão ('+esc(da.pageName||da.pageId)+')':'Selecionar página...'}</option>
+    ${S.pages.map(p=>`<option value="${esc(p.id)}" ${conf.pageId===p.id?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
+  </select>`:`
+  <input type="text" placeholder="Page ID (deixe vazio para usar padrão)" value="${esc(conf.pageId)}" oninput="S.adsetAds[${si}].pageId=this.value;S.adsetAds[${si}].pageName=''"
+    style="width:100%;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.875rem;outline:none;"
+    onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'"/>`}
+  ${conf.pageId&&conf.pageName?`<p style="font-size:.75rem;color:#16A34A;margin:.25rem 0 0;font-weight:600;">✓ ${esc(conf.pageName)}</p>`:''}`)}
+  ${card(`Anúncios do Conjunto ${si+1}`,`${filled}/${S.na} anúncios com mídia · cada anúncio pode ter mídia e copy diferentes`,`
+  <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;">
+    <button onclick="openMediaForAdsetAds(${si})" style="flex:1;padding:.5rem;border:2px dashed var(--border-light);border-radius:.5rem;background:rgba(215,250,0,.08);color:#1a2440;font-weight:700;font-size:.75rem;cursor:pointer;">📁 Selecionar ${S.na} mídias em bulk</button>
+    ${filled>0?`<button onclick="S.adsetAds[${si}].ads.forEach(a=>{a.videoId='';a.videoThumb='';a.imageUrl='';a.imageHash='';});R()" style="padding:.5rem 1rem;background:transparent;color:#EF4444;border:1.5px solid #EF4444;border-radius:.5rem;font-size:.7rem;font-weight:600;cursor:pointer;">Limpar mídia</button>`:''}
+  </div>
+  <div style="display:flex;flex-direction:column;gap:.5rem;max-height:480px;overflow-y:auto;padding-right:.25rem;">
+    ${conf.ads.map((ad,ai)=>{
+      const has=ad.videoId||ad.imageUrl||ad.imageHash;
+      return `<div style="border:1.5px solid ${has?'var(--border-light)':'var(--border)'};border-radius:.625rem;padding:.625rem;">
+        <div style="display:flex;align-items:center;gap:.625rem;margin-bottom:.5rem;">
+          <span style="font-size:.7rem;font-weight:700;background:rgba(215,250,0,.15);color:#1a2440;padding:.25rem .625rem;border-radius:99px;">Ad ${ai+1}</span>
+          ${has?`<span style="font-size:.6rem;background:${ad.videoId?'var(--accent)':'#F59E0B'};color:white;padding:1px 6px;border-radius:99px;font-weight:700;">${ad.videoId?'VIDEO':'IMAGEM'}</span>`:`<span style="font-size:.6rem;color:var(--text-muted);">Sem mídia</span>`}
+        </div>
+        <div style="display:grid;grid-template-columns:88px 1fr;gap:.625rem;">
+          <div>
+            ${has?`<div style="position:relative;">
+              ${ad.videoThumb?`<img src="${ad.videoThumb}" onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;object-fit:cover;border-radius:.5rem;border:2px solid var(--border-light);cursor:pointer;"/>`:
+                ad.imageUrl?`<img src="${ad.imageUrl}" onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;object-fit:cover;border-radius:.5rem;border:2px solid var(--border-light);cursor:pointer;" onerror="this.style.display='none'"/>`:
+                `<div onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;background:var(--border-light);border-radius:.5rem;display:flex;align-items:center;justify-content:center;font-size:1.5rem;cursor:pointer;">🎬</div>`}
+              <button onclick="S.adsetAds[${si}].ads[${ai}].videoId='';S.adsetAds[${si}].ads[${ai}].videoThumb='';S.adsetAds[${si}].ads[${ai}].imageUrl='';S.adsetAds[${si}].ads[${ai}].imageHash='';R()" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;background:#EF4444;border:none;border-radius:50%;color:white;font-size:.625rem;cursor:pointer;">×</button>
+            </div>`:`
+            <button onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;border:1.5px dashed var(--border);border-radius:.5rem;background:var(--bg-card);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.125rem;cursor:pointer;">
+              <span style="font-size:1.25rem;">📁</span>
+              <span style="font-size:.55rem;color:var(--text-muted);font-weight:600;">Mídia</span>
+            </button>`}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:.375rem;">
+            <textarea id="adset-${si}-ad-${ai}-pt" oninput="S.adsetAds[${si}].ads[${ai}].primaryText=this.value" placeholder="Texto principal (vazio = usa global)"
+              style="width:100%;border:1.5px solid var(--border);border-radius:.375rem;padding:.375rem .5rem;font-size:.75rem;outline:none;resize:none;min-height:42px;"
+              onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'">${esc(ad.primaryText||'')}</textarea>
+            <input id="adset-${si}-ad-${ai}-hl" value="${esc(ad.headline||'')}" oninput="S.adsetAds[${si}].ads[${ai}].headline=this.value" placeholder="Headline (vazio = usa global)"
+              style="width:100%;border:1.5px solid var(--border);border-radius:.375rem;padding:.375rem .5rem;font-size:.75rem;outline:none;"
+              onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'"/>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`)}
+  <div style="background:var(--border-light);border:1px solid var(--border);border-radius:.625rem;padding:.75rem;font-size:.7rem;color:var(--text-secondary);">
+    <strong>💡 Dica:</strong> Texto e mídia vazios usam o valor global definido na campanha. A página do FB, URL de destino e CTA são herdados das configurações globais (definidas na primeira janela de anúncio).
+  </div>`;
 }
 
 function renderS4() {
@@ -2165,6 +2278,19 @@ function openMediaForCampAdsetAd(ci,si,ai) {
   mediaFolder=null;mediaSearch='';mediaMultiSelect=false;mediaSelected=[];
   _openMediaModal();
 }
+// Modo editAdsPerAdset: um conjunto tem N anúncios editáveis
+function openMediaForAdsetAds(si){
+  // Bulk selecionar N mídias para o conjunto si
+  S.mediaSelectTarget={type:'adset_ads_bulk',si};
+  mediaFolder=null;mediaSearch='';mediaMultiSelect=true;mediaSelected=[];
+  _openMediaModal();
+}
+function openMediaForAdsetAd(si,ai){
+  // Seleção individual da mídia de um anúncio específico
+  S.mediaSelectTarget={type:'adset_ad',si,ai};
+  mediaFolder=null;mediaSearch='';mediaMultiSelect=false;mediaSelected=[];
+  _openMediaModal();
+}
 function toggleMediaSelect(type,id,url,hash,thumb,title) {
   const idx=mediaSelected.findIndex(m=>m.id===id&&m.url===url);
   if(idx>=0)mediaSelected.splice(idx,1);
@@ -2204,6 +2330,18 @@ function confirmMultiSelect() {
       const m=mediaSelected[ai%mediaSelected.length];
       if(m)S.campAdsetCreatives[`${ci}_${si}_${ai}`]=makeCr(m);
     }
+    closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.na} anúncios do Conj. ${si+1}`,'success');R();
+  } else if(target&&typeof target==='object'&&target.type==='adset_ads_bulk'){
+    // Modo editAdsPerAdset: bulk nos N anúncios do conjunto si
+    const si=target.si;
+    if(!S.adsetAds[si])S.adsetAds[si]={ads:[],pageId:'',pageName:''};
+    S.adsetAds[si].ads=Array.from({length:S.na},(_,ai)=>{
+      const m=mediaSelected[ai%mediaSelected.length];
+      const existing=S.adsetAds[si].ads[ai]||{primaryText:'',headline:''};
+      if(!m)return existing;
+      const cr=makeCr(m);
+      return {...existing,...cr};
+    });
     closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.na} anúncios do Conj. ${si+1}`,'success');R();
   } else {
     S.adsetCreatives=Array.from({length:S.ns},(_,i)=>{const m=mediaSelected[i%mediaSelected.length];return m?makeCr(m):null;});
@@ -2419,6 +2557,15 @@ function selectMedia(type,id,urlOrThumb,titleOrHash) {
       :{mediaType:'image',imageUrl:urlOrThumb,imageHash:titleOrHash,videoId:'',videoThumb:''};
     S.mediaSelectTarget=null;closeMedia();R();return;
   }
+  if(target&&typeof target==='object'&&target.type==='adset_ad'){
+    const {si,ai}=target;
+    if(!S.adsetAds[si])S.adsetAds[si]={ads:[],pageId:'',pageName:''};
+    if(!S.adsetAds[si].ads[ai])S.adsetAds[si].ads[ai]={mediaType:'image',imageUrl:'',imageHash:'',videoId:'',videoThumb:'',primaryText:'',headline:''};
+    const ad=S.adsetAds[si].ads[ai];
+    if(type==='video'){ad.mediaType='video';ad.videoId=id;ad.videoThumb=urlOrThumb;ad.imageUrl='';ad.imageHash='';}
+    else{ad.mediaType='image';ad.imageUrl=urlOrThumb;ad.imageHash=titleOrHash;ad.videoId='';ad.videoThumb='';}
+    S.mediaSelectTarget=null;closeMedia();R();return;
+  }
   if (target!==null&&typeof target==='number') {
     if(!S.campaignCreatives[target])S.campaignCreatives[target]={mediaType:'image',primaryText:'',headline:'',imageUrl:'',imageHash:'',videoId:'',videoThumb:''};
     const cr=S.campaignCreatives[target];
@@ -2516,9 +2663,44 @@ function validateStep(n){
 }
 
 function nextStep(){
-  const errs=validateStep(S.bulkStep);
+  const info=getStepInfo(S.bulkStep);
+  const errs=validateStepType(info);
   if(errs.length){errs.forEach(e=>toast(e,'warning'));return;}
-  S.bulkStep=Math.min(5,S.bulkStep+1);R();
+  const maxStep=getDynamicSteps().length-1;
+  S.bulkStep=Math.min(maxStep,S.bulkStep+1);R();
+}
+function validateStepType(info){
+  const errs=[];
+  if(info.type==='campanha'){
+    // Só valida se tem nome (validação antiga)
+    if(S.campNames.some(n=>!n.trim()))errs.push('Todos os nomes de campanha devem ser preenchidos.');
+    if(new Set(S.campNames.map(n=>n.trim())).size!==S.campNames.length)errs.push('Nomes de campanha devem ser únicos.');
+  }
+  if(info.type==='conjunto'){
+    if(!S.cc.cbo&&(!S.ds.budget||parseFloat(S.ds.budget)<1))errs.push('Orçamento mínimo: $1/dia.');
+    if(S.cc.objective==='OUTCOME_SALES'&&!S.ds.pixelId)errs.push('Pixel obrigatório para objetivo Vendas.');
+    if(!S.ds.countries.trim())errs.push('Informe pelo menos um país.');
+    const bs=S.cc.bidStrategy||'LOWEST_COST_WITHOUT_CAP';
+    if(bs!=='LOWEST_COST_WITHOUT_CAP'){
+      const eff=S.ds.bidAmount||S.cc.bidAmount;
+      if(!eff||parseFloat(eff)<=0)errs.push('Informe o valor do lance/custo/ROAS.');
+    }
+  }
+  if(info.type==='anuncio'){
+    // Valida config global da primeira janela
+    if(info.adsetIdx<=0){
+      if(S.pageMode==='per_campaign'&&S.nc>1){
+        const hasAny=S.campaignPages.some(p=>p)||S.da.pageId;
+        if(!hasAny)errs.push('Selecione pelo menos uma página (padrão ou por campanha).');
+      }else{
+        if(!S.da.pageId)errs.push('Selecione uma Página do Facebook.');
+      }
+      if(!S.da.linkUrl||!S.da.linkUrl.startsWith('http'))errs.push('URL de destino inválida.');
+      if(!S.da.primaryTexts.some(t=>t.trim()))errs.push('Pelo menos um texto principal é obrigatório.');
+      if(S.creativeMode==='per_adset'&&!S.adsetCreatives.some(c=>c))errs.push('Selecione pelo menos 1 mídia para os conjuntos.');
+    }
+  }
+  return errs;
 }
 
 function showConfirmPub(){
@@ -2937,7 +3119,9 @@ async function startPub(){
     };
 
     // Pre-fetch video thumbnails for all unique video IDs used
-    const allVideoIds=[...new Set([da.videoId,...(S.campaignCreatives||[]).map(c=>c?.videoId),...(S.adsetCreatives||[]).map(c=>c?.videoId),...(S.adCreatives||[]).map(c=>c?.videoId),...Object.values(S.campAdsetCreatives||{}).map(c=>c?.videoId)].filter(Boolean))];
+    const adsetAdsVids=[];
+    Object.values(S.adsetAds||{}).forEach(c=>(c?.ads||[]).forEach(a=>{if(a?.videoId)adsetAdsVids.push(a.videoId);}));
+    const allVideoIds=[...new Set([da.videoId,...(S.campaignCreatives||[]).map(c=>c?.videoId),...(S.adsetCreatives||[]).map(c=>c?.videoId),...(S.adCreatives||[]).map(c=>c?.videoId),...Object.values(S.campAdsetCreatives||{}).map(c=>c?.videoId),...adsetAdsVids].filter(Boolean))];
     const videoThumbs={};
     if(allVideoIds.length){
       plog(`  📷 Buscando thumbnails de ${allVideoIds.length} vídeo(s)...`,'loading');
@@ -2946,6 +3130,7 @@ async function startPub(){
       thumbBatch.forEach((r,i)=>{const p=parseBatch(r);if(!p.error&&p.picture)videoThumbs[allVideoIds[i]]=p.picture;});
     }
 
+    const editPerAdset=S.editAdsPerAdset&&S.ns>1; // wizards separados por conjunto
     const perAdMedia=S.adMediaMode==='per_ad'&&na>1;
     const perAdCopy=S.adCopyMode==='per_ad'&&na>1;
     const matrixPerAd=mode==='per_campaign_adset'&&na>1; // matriz com granularidade por anúncio
@@ -2953,25 +3138,29 @@ async function startPub(){
     aids.forEach((id,i)=>{
       if(!id)return;
       const {ci,si}=am[i],cleanUrl=da.linkUrl;
-      const adCount=perAdMedia||perAdCopy||matrixPerAd?na:1;
+      const adCount=(perAdMedia||perAdCopy||matrixPerAd||editPerAdset)?na:1;
 
       for(let a=0;a<adCount;a++){
+        // Modo editPerAdset: lê de S.adsetAds[si]
+        const adsetConf=editPerAdset?S.adsetAds[si]:null;
+        const adFromConf=adsetConf?.ads?.[a];
         // Resolve matrix cell per ad when applicable
         const matrixCr=mode==='per_campaign_adset'
           ? (matrixPerAd ? S.campAdsetCreatives[`${ci}_${si}_${a}`] : S.campAdsetCreatives[`${ci}_${si}`])
           : null;
         const campCr=mode==='per_campaign'?S.campaignCreatives[ci]:mode==='per_adset'?S.adsetCreatives[si]:matrixCr;
-        const effPageId=(S.pageMode==='per_campaign'&&S.campaignPages[ci])||da.pageId;
-        // Media: per-ad override > matrix/campaign/adset override > global
+        // editPerAdset override de página, depois per_campaign, depois global
+        const effPageId=(adsetConf?.pageId)||(S.pageMode==='per_campaign'&&S.campaignPages[ci])||da.pageId;
+        // Media: editPerAdset > per-ad > campaign/adset > global
         const adCr=perAdMedia?S.adCreatives[a]:null;
-        const effHash=adCr?.imageHash||campCr?.imageHash||da.imageHash;
-        const effImgUrl=adCr?.imageUrl||campCr?.imageUrl||da.imageUrl;
-        const effVideoId=adCr?.videoId||campCr?.videoId||da.videoId;
-        const effVideoThumb=adCr?.videoThumb||campCr?.videoThumb||da.videoThumb||videoThumbs[effVideoId]||'';
-        // Copy: per-ad override > campaign override > global
+        const effHash=adFromConf?.imageHash||adCr?.imageHash||campCr?.imageHash||da.imageHash;
+        const effImgUrl=adFromConf?.imageUrl||adCr?.imageUrl||campCr?.imageUrl||da.imageUrl;
+        const effVideoId=adFromConf?.videoId||adCr?.videoId||campCr?.videoId||da.videoId;
+        const effVideoThumb=adFromConf?.videoThumb||adCr?.videoThumb||campCr?.videoThumb||da.videoThumb||videoThumbs[effVideoId]||'';
+        // Copy: editPerAdset > per-ad > campaign > global
         const adCp=perAdCopy?S.adCopies[a]:null;
-        const effMsg=(adCp?.primaryText?.trim())||(campCr?.primaryText?.trim())||(da.primaryTexts[0]||'').trim();
-        const effHl=(adCp?.headline?.trim())||(campCr?.headline?.trim())||(da.headlines[0]||'').trim();
+        const effMsg=(adFromConf?.primaryText?.trim())||(adCp?.primaryText?.trim())||(campCr?.primaryText?.trim())||(da.primaryTexts[0]||'').trim();
+        const effHl=(adFromConf?.headline?.trim())||(adCp?.headline?.trim())||(campCr?.headline?.trim())||(da.headlines[0]||'').trim();
 
         let spec;
         if(effVideoId){
@@ -2998,20 +3187,20 @@ async function startPub(){
       const p=parseBatch(r);
       const {ai,ci,si,adIdx}=crm[idx];
       if(!p.error){
-        if(perAdMedia||perAdCopy||matrixPerAd){
+        if(perAdMedia||perAdCopy||matrixPerAd||editPerAdset){
           if(!crid_multi[ai])crid_multi[ai]=[];
           crid_multi[ai][adIdx]=p.id;
         }else{
           crid[ai]=p.id;
         }
-      }else{plog(`  ✗ Creative C${ci+1}S${si+1}${(perAdMedia||perAdCopy||matrixPerAd)?'A'+(adIdx+1):''}: ${p.error.message}`,'error');}
+      }else{plog(`  ✗ Creative C${ci+1}S${si+1}${(perAdMedia||perAdCopy||matrixPerAd||editPerAdset)?'A'+(adIdx+1):''}: ${p.error.message}`,'error');}
     });
     plog(`  ${Object.keys(crid).length+Object.keys(crid_multi).length} adsets com criativos criados`,'info');
     if(stopPub)throw new Error('stop');
 
     plog('━━ FASE 4/4 — anúncios','loading');
     const aq=[];
-    if(perAdMedia||perAdCopy||matrixPerAd){
+    if(perAdMedia||perAdCopy||matrixPerAd||editPerAdset){
       // Each ad gets its own creative
       Object.entries(crid_multi).forEach(([ai,crIds])=>{
         const adid=aids[+ai],{ci,si}=am[+ai];
