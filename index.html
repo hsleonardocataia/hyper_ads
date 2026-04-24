@@ -1657,6 +1657,25 @@ function ensureAdsetAds(si){
   if(!Array.isArray(c.adCopies))c.adCopies=[];
 }
 
+// Helper: renderiza o card de mídia padrão do conjunto (sem template aninhado complexo)
+function renderAdsetMediaCard(si,c){
+  const isVideo=c.mediaType==='video'&&c.videoId;
+  const isImage=c.mediaType==='image'&&(c.imageUrl||c.imageHash);
+  let body='';
+  if(isVideo){
+    const thumb=c.videoThumb?('<img src="'+c.videoThumb+'" style="width:100%;height:160px;object-fit:cover;display:block;"/>'):('<div style="height:160px;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;font-size:3rem;">🎬</div>');
+    body='<div style="border:2px solid #22C55E;border-radius:.75rem;overflow:hidden;"><div style="position:relative;">'+thumb+'<div style="position:absolute;top:8px;left:8px;background:#22C55E;color:white;font-size:.7rem;padding:2px 8px;border-radius:99px;font-weight:700;">✓ Vídeo</div></div><div style="display:flex;border-top:1px solid var(--border);"><button onclick="openMediaForAdsetDefault('+si+')" style="flex:1;padding:.625rem;border:none;background:transparent;color:var(--accent);font-size:.8rem;font-weight:600;cursor:pointer;border-right:1px solid var(--border);">Trocar</button><button onclick="S.adsetAds['+si+'].mediaType=\'image\';S.adsetAds['+si+'].videoId=\'\';S.adsetAds['+si+'].videoThumb=\'\';R()" style="flex:1;padding:.625rem;border:none;background:transparent;color:#EF4444;font-size:.8rem;cursor:pointer;">Remover</button></div></div>';
+  } else if(isImage){
+    body='<div style="border:2px solid #22C55E;border-radius:.75rem;overflow:hidden;"><div style="position:relative;"><img src="'+c.imageUrl+'" style="width:100%;height:160px;object-fit:cover;display:block;" onerror="this.style.display=\'none\'"/><div style="position:absolute;top:8px;left:8px;background:#22C55E;color:white;font-size:.7rem;padding:2px 8px;border-radius:99px;font-weight:700;">✓ Imagem</div></div><div style="display:flex;border-top:1px solid var(--border);"><button onclick="openMediaForAdsetDefault('+si+')" style="flex:1;padding:.625rem;border:none;background:transparent;color:var(--accent);font-size:.8rem;font-weight:600;cursor:pointer;border-right:1px solid var(--border);">Trocar</button><button onclick="S.adsetAds['+si+'].imageUrl=\'\';S.adsetAds['+si+'].imageHash=\'\';R()" style="flex:1;padding:.625rem;border:none;background:transparent;color:#EF4444;font-size:.8rem;cursor:pointer;">Remover</button></div></div>';
+  } else {
+    const da=S.da;
+    const hasGlobal=da.videoId||da.imageUrl;
+    const hint=hasGlobal?'Ou deixe vazio para usar a mídia global':'Imagem ou vídeo';
+    body='<button onclick="openMediaForAdsetDefault('+si+')" style="width:100%;border:2px dashed var(--border);border-radius:.75rem;padding:2.5rem;display:flex;flex-direction:column;align-items:center;gap:.5rem;background:var(--bg-card);cursor:pointer;"><span style="font-size:2rem;">📁</span><p style="font-weight:600;color:var(--text-secondary);margin:0;font-size:.875rem;">Abrir Biblioteca de Mídia</p><p style="color:var(--text-muted);margin:0;font-size:.75rem;">'+hint+'</p></button>';
+  }
+  return card('Mídia Padrão do Conjunto','Usada como fallback se os anúncios individuais estiverem vazios',body);
+}
+
 // Render da tela de anúncios por conjunto específico (modo editAdsPerAdset)
 // Usa o MESMO formato visual do renderS3 padrão, mas com state em S.adsetAds[si]
 function renderS3ForAdset(si){
@@ -1727,33 +1746,8 @@ function renderS3ForAdset(si){
     ${effLinkUrl&&effUrlParams?`<p style="font-size:.7rem;font-family:monospace;color:var(--text-secondary);word-break:break-all;margin:.375rem 0 0;padding:.5rem;background:var(--bg-secondary);border-radius:.375rem;">${esc(finalUrl)}</p>`:''}
   </div>`);
 
-  // ── Mídia Padrão do conjunto (igual renderS3 modo single) ──
-  const isVideo=c.mediaType==='video'&&c.videoId, isImage=c.mediaType==='image'&&(c.imageUrl||c.imageHash);
-  const mediaCard=card('Mídia Padrão do Conjunto','Usada como fallback se os anúncios individuais estiverem vazios',`
-  ${isVideo?`
-  <div style="border:2px solid #22C55E;border-radius:.75rem;overflow:hidden;">
-    <div style="position:relative;">${c.videoThumb?`<img src="${c.videoThumb}" style="width:100%;height:160px;object-fit:cover;display:block;"/>`:
-      `<div style="height:160px;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;font-size:3rem;">🎬</div>`}
-      <div style="position:absolute;top:8px;left:8px;background:#22C55E;color:white;font-size:.7rem;padding:2px 8px;border-radius:99px;font-weight:700;">✓ Vídeo</div>
-    </div>
-    <div style="display:flex;border-top:1px solid var(--border);">
-      <button onclick="openMediaForAdsetDefault(${si})" style="flex:1;padding:.625rem;border:none;background:transparent;color:var(--accent);font-size:.8rem;font-weight:600;cursor:pointer;border-right:1px solid var(--border);">Trocar</button>
-      <button onclick="S.adsetAds[${si}].mediaType='image';S.adsetAds[${si}].videoId='';S.adsetAds[${si}].videoThumb='';S.adsetAds[${si}].videoTitle='';R()" style="flex:1;padding:.625rem;border:none;background:transparent;color:#EF4444;font-size:.8rem;cursor:pointer;">Remover</button>
-    </div>
-  </div>`:isImage?`
-  <div style="border:2px solid #22C55E;border-radius:.75rem;overflow:hidden;">
-    <div style="position:relative;"><img src="${c.imageUrl}" style="width:100%;height:160px;object-fit:cover;display:block;" onerror="this.style.display='none'"/>
-      <div style="position:absolute;top:8px;left:8px;background:#22C55E;color:white;font-size:.7rem;padding:2px 8px;border-radius:99px;font-weight:700;">✓ Imagem</div>
-    </div>
-    <div style="display:flex;border-top:1px solid var(--border);">
-      <button onclick="openMediaForAdsetDefault(${si})" style="flex:1;padding:.625rem;border:none;background:transparent;color:var(--accent);font-size:.8rem;font-weight:600;cursor:pointer;border-right:1px solid var(--border);">Trocar</button>
-      <button onclick="S.adsetAds[${si}].imageUrl='';S.adsetAds[${si}].imageHash='';R()" style="flex:1;padding:.625rem;border:none;background:transparent;color:#EF4444;font-size:.8rem;cursor:pointer;">Remover</button>
-    </div>
-  </div>`:`
-  <button onclick="openMediaForAdsetDefault(${si})" style="width:100%;border:2px dashed var(--border);border-radius:.75rem;padding:2.5rem;display:flex;flex-direction:column;align-items:center;gap:.5rem;background:var(--bg-card);cursor:pointer;" onmouseover="this.style.borderColor='#1a2440'" onmouseout="this.style.borderColor='var(--border)'">
-    <span style="font-size:2rem;">📁</span><p style="font-weight:600;color:var(--text-secondary);margin:0;font-size:.875rem;">Abrir Biblioteca de Mídia</p>
-    <p style="color:var(--text-muted);margin:0;font-size:.75rem;">${da.videoId||da.imageUrl?'Ou deixe vazio para usar a mídia global':'Imagem ou vídeo'}</p>
-  </button>`);
+  // ── Mídia Padrão do conjunto (usa helper sem template aninhado) ──
+  const mediaCard=renderAdsetMediaCard(si,c);
 
   // ── Copy Padrão do conjunto ──
   const copyCard=card('Copy Padrão do Conjunto','Texto e headline para este conjunto (vazio = usa global)',`
