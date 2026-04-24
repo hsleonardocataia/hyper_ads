@@ -1637,80 +1637,232 @@ function renderS3(adsetIdx=-1) {
   return modeCard+pageModeCard+globalCard+perCampCard+adLevelCard;
 }
 
-// Render da tela de anúncios por conjunto específico (modo editAdsPerAdset)
-function renderS3ForAdset(si){
-  const da=S.da;
-  if(!S.adsetAds[si])S.adsetAds[si]={ads:Array.from({length:S.na},()=>({mediaType:'image',imageUrl:'',imageHash:'',videoId:'',videoThumb:'',primaryText:'',headline:''})),pageId:'',pageName:''};
-  const conf=S.adsetAds[si];
-  // Ajusta tamanho do array ads se na mudou
-  if(conf.ads.length!==S.na){
-    const old=conf.ads;
-    conf.ads=Array.from({length:S.na},(_,i)=>old[i]||{mediaType:'image',imageUrl:'',imageHash:'',videoId:'',videoThumb:'',primaryText:'',headline:''});
+// Inicializa S.adsetAds[si] com estrutura completa (igual a S.da + extras de ad)
+function ensureAdsetAds(si){
+  if(!S.adsetAds[si]){
+    S.adsetAds[si]={
+      pageId:'', pageName:'',
+      linkUrl:'', urlParams:'',
+      name:'', cta:'',
+      mediaType:'image', imageUrl:'', imageHash:'', videoId:'', videoThumb:'', videoTitle:'',
+      primaryTexts:[''], headlines:[''],
+      adMediaMode:'single', adCopyMode:'single',
+      adCreatives:[], adCopies:[]
+    };
   }
-  const filled=conf.ads.filter(a=>a.videoId||a.imageUrl||a.imageHash).length;
+  const c=S.adsetAds[si];
+  if(!Array.isArray(c.primaryTexts)||!c.primaryTexts.length)c.primaryTexts=[''];
+  if(!Array.isArray(c.headlines)||!c.headlines.length)c.headlines=[''];
+  if(!Array.isArray(c.adCreatives))c.adCreatives=[];
+  if(!Array.isArray(c.adCopies))c.adCopies=[];
+}
 
-  // Copy shortcut button
-  const copyFromAdset=si>0?`<button onclick="S.adsetAds[${si}]=JSON.parse(JSON.stringify(S.adsetAds[${si-1}]||{ads:[],pageId:'',pageName:''}));R()" style="padding:.375rem .75rem;background:var(--border-light);color:#1a2440;border:1.5px solid var(--border);border-radius:.5rem;font-size:.7rem;font-weight:600;cursor:pointer;">📋 Copiar do Conj. ${si}</button>`:'';
+// Render da tela de anúncios por conjunto específico (modo editAdsPerAdset)
+// Usa o MESMO formato visual do renderS3 padrão, mas com state em S.adsetAds[si]
+function renderS3ForAdset(si){
+  ensureAdsetAds(si);
+  const c=S.adsetAds[si];
+  const da=S.da; // fallback global
+  // Efetivos: usa o do conjunto se preenchido, senão o global
+  const effPageId=c.pageId||da.pageId;
+  const effPageName=c.pageId?c.pageName:da.pageName;
+  const effLinkUrl=c.linkUrl||da.linkUrl;
+  const effUrlParams=c.urlParams!==''?c.urlParams:(da.urlParams||'');
+  const effName=c.name||da.name;
+  const effCta=c.cta||da.cta;
+  const finalUrl=effUrlParams?`${effLinkUrl||''}${(effLinkUrl||'').includes('?')?'&':'?'}${effUrlParams}`:effLinkUrl||'';
 
-  return `<div style="margin-bottom:1rem;background:rgba(215,250,0,.08);border:1px solid rgba(215,250,0,.3);border-radius:.625rem;padding:.75rem 1rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
+  // Header do conjunto
+  const copyFromAdset=si>0?`<button onclick="S.adsetAds[${si}]=JSON.parse(JSON.stringify(S.adsetAds[${si-1}]));R()" style="padding:.375rem .75rem;background:var(--border-light);color:#1a2440;border:1.5px solid var(--border);border-radius:.5rem;font-size:.7rem;font-weight:600;cursor:pointer;">📋 Copiar do Conj. ${si}</button>`:'';
+  const headerBar=`<div style="margin-bottom:1rem;background:rgba(215,250,0,.1);border:1px solid rgba(215,250,0,.3);border-radius:.625rem;padding:.75rem 1rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
     <div>
-      <p style="font-size:.7rem;color:var(--text-muted);margin:0;text-transform:uppercase;font-weight:700;letter-spacing:.06em;">Editando</p>
-      <p style="font-size:1rem;font-weight:800;color:#1a2440;margin:.125rem 0 0;">Conjunto ${si+1} de ${S.ns} · ${S.na} anúncios</p>
+      <p style="font-size:.65rem;color:var(--text-muted);margin:0;text-transform:uppercase;font-weight:700;letter-spacing:.08em;">Editando</p>
+      <p style="font-size:1rem;font-weight:800;color:#1a2440;margin:.125rem 0 0;">Conjunto ${si+1} de ${S.ns}${S.na>1?' · '+S.na+' anúncios':''}</p>
     </div>
     ${copyFromAdset}
-  </div>
-  ${card('Página do Facebook','Usada para todos os anúncios deste conjunto',`
+  </div>`;
+
+  // ── Página do Facebook (igual renderS3 mas gravando em S.adsetAds[si]) ──
+  const pageCard=card('Página do Facebook','Página específica deste conjunto (vazio = usa global)',`
   ${S.pages.length?`
-  <select onchange="const p=S.pages.find(x=>x.id===this.value);S.adsetAds[${si}].pageId=this.value;S.adsetAds[${si}].pageName=p?p.name:'';"
+  <select onchange="const p=S.pages.find(x=>x.id===this.value);S.adsetAds[${si}].pageId=this.value;S.adsetAds[${si}].pageName=p?p.name:'';R()"
     style="width:100%;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.875rem;outline:none;background:var(--bg-card);">
     <option value="">${da.pageId?'↳ Usar página padrão ('+esc(da.pageName||da.pageId)+')':'Selecionar página...'}</option>
-    ${S.pages.map(p=>`<option value="${esc(p.id)}" ${conf.pageId===p.id?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
+    ${S.pages.map(p=>`<option value="${esc(p.id)}" ${c.pageId===p.id?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
   </select>`:`
-  <input type="text" placeholder="Page ID (deixe vazio para usar padrão)" value="${esc(conf.pageId)}" oninput="S.adsetAds[${si}].pageId=this.value;S.adsetAds[${si}].pageName=''"
+  <input type="text" placeholder="Page ID (vazio = usa padrão)" value="${esc(c.pageId)}" oninput="S.adsetAds[${si}].pageId=this.value;S.adsetAds[${si}].pageName=''"
     style="width:100%;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.875rem;outline:none;"
     onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'"/>`}
-  ${conf.pageId&&conf.pageName?`<p style="font-size:.75rem;color:#16A34A;margin:.25rem 0 0;font-weight:600;">✓ ${esc(conf.pageName)}</p>`:''}`)}
-  ${card(`Anúncios do Conjunto ${si+1}`,`${filled}/${S.na} anúncios com mídia · cada anúncio pode ter mídia e copy diferentes`,`
-  <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;">
-    <button onclick="openMediaForAdsetAds(${si})" style="flex:1;padding:.5rem;border:2px dashed var(--border-light);border-radius:.5rem;background:rgba(215,250,0,.08);color:#1a2440;font-weight:700;font-size:.75rem;cursor:pointer;">📁 Selecionar ${S.na} mídias em bulk</button>
-    ${filled>0?`<button onclick="S.adsetAds[${si}].ads.forEach(a=>{a.videoId='';a.videoThumb='';a.imageUrl='';a.imageHash='';});R()" style="padding:.5rem 1rem;background:transparent;color:#EF4444;border:1.5px solid #EF4444;border-radius:.5rem;font-size:.7rem;font-weight:600;cursor:pointer;">Limpar mídia</button>`:''}
+  ${c.pageId&&c.pageName?`<p style="font-size:.75rem;color:#16A34A;margin:.25rem 0 0;font-weight:600;">✓ ${esc(c.pageName)}</p>`:!c.pageId&&da.pageId?`<p style="font-size:.7rem;color:var(--text-muted);margin:.25rem 0 0;">↳ Usando padrão global: ${esc(da.pageName||da.pageId)}</p>`:''}`);
+
+  // ── Configurações Globais do conjunto (URL destino, nome, CTA, URL params) ──
+  const globalCard=card('Configurações do Conjunto','URL, nome e CTA deste conjunto (vazio = usa global)',`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.875rem;">
+    <div>
+      <label style="display:block;font-size:.65rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.375rem;">URL de destino</label>
+      <input id="adset-${si}-url" type="text" placeholder="${da.linkUrl?'↳ Padrão: '+esc(da.linkUrl):'https://...'}" value="${esc(c.linkUrl)}" oninput="S.adsetAds[${si}].linkUrl=this.value"
+        style="width:100%;border:1.5px solid var(--border);border-radius:.625rem;padding:.625rem .875rem;font-size:.85rem;outline:none;background:var(--bg-card);color:var(--text-primary);"
+        onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'"/>
+    </div>
+    <div>
+      <label style="display:block;font-size:.65rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.375rem;">Nome base do anúncio</label>
+      <input id="adset-${si}-name" type="text" placeholder="${da.name?'↳ Padrão: '+esc(da.name):'Creative_01'}" value="${esc(c.name)}" oninput="S.adsetAds[${si}].name=this.value"
+        style="width:100%;border:1.5px solid var(--border);border-radius:.625rem;padding:.625rem .875rem;font-size:.85rem;outline:none;background:var(--bg-card);color:var(--text-primary);"
+        onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'"/>
+    </div>
   </div>
-  <div style="display:flex;flex-direction:column;gap:.5rem;max-height:480px;overflow-y:auto;padding-right:.25rem;">
-    ${conf.ads.map((ad,ai)=>{
-      const has=ad.videoId||ad.imageUrl||ad.imageHash;
-      return `<div style="border:1.5px solid ${has?'var(--border-light)':'var(--border)'};border-radius:.625rem;padding:.625rem;">
-        <div style="display:flex;align-items:center;gap:.625rem;margin-bottom:.5rem;">
-          <span style="font-size:.7rem;font-weight:700;background:rgba(215,250,0,.15);color:#1a2440;padding:.25rem .625rem;border-radius:99px;">Ad ${ai+1}</span>
-          ${has?`<span style="font-size:.6rem;background:${ad.videoId?'var(--accent)':'#F59E0B'};color:white;padding:1px 6px;border-radius:99px;font-weight:700;">${ad.videoId?'VIDEO':'IMAGEM'}</span>`:`<span style="font-size:.6rem;color:var(--text-muted);">Sem mídia</span>`}
+  <div>
+    <label style="display:block;font-size:.65rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.375rem;">CTA</label>
+    <select onchange="S.adsetAds[${si}].cta=this.value" style="width:100%;border:1.5px solid var(--border);border-radius:.625rem;padding:.625rem .875rem;font-size:.85rem;outline:none;background:var(--bg-card);color:var(--text-primary);">
+      <option value="">${da.cta?'↳ Usar padrão ('+esc(da.cta.replace(/_/g,' '))+')':'Selecionar...'}</option>
+      ${CTA_OPTIONS.map(o=>`<option value="${o}" ${c.cta===o?'selected':''}>${o.replace(/_/g,' ')}</option>`).join('')}
+    </select>
+  </div>
+  <div>
+    <label style="display:block;font-size:.65rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.375rem;">Parâmetros de URL</label>
+    <textarea id="adset-${si}-urlparams" oninput="S.adsetAds[${si}].urlParams=this.value"
+      style="width:100%;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.8rem;font-family:monospace;outline:none;resize:none;min-height:50px;background:var(--bg-card);color:var(--text-primary);"
+      onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'"
+      placeholder="${da.urlParams?'↳ Padrão: '+esc(da.urlParams).slice(0,80):'utm_source=facebook&...'}">${esc(c.urlParams||'')}</textarea>
+    ${effLinkUrl&&effUrlParams?`<p style="font-size:.7rem;font-family:monospace;color:var(--text-secondary);word-break:break-all;margin:.375rem 0 0;padding:.5rem;background:var(--bg-secondary);border-radius:.375rem;">${esc(finalUrl)}</p>`:''}
+  </div>`);
+
+  // ── Mídia Padrão do conjunto (igual renderS3 modo single) ──
+  const isVideo=c.mediaType==='video'&&c.videoId, isImage=c.mediaType==='image'&&(c.imageUrl||c.imageHash);
+  const mediaCard=card('Mídia Padrão do Conjunto','Usada como fallback se os anúncios individuais estiverem vazios',`
+  ${isVideo?`
+  <div style="border:2px solid #22C55E;border-radius:.75rem;overflow:hidden;">
+    <div style="position:relative;">${c.videoThumb?`<img src="${c.videoThumb}" style="width:100%;height:160px;object-fit:cover;display:block;"/>`:
+      `<div style="height:160px;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;font-size:3rem;">🎬</div>`}
+      <div style="position:absolute;top:8px;left:8px;background:#22C55E;color:white;font-size:.7rem;padding:2px 8px;border-radius:99px;font-weight:700;">✓ Vídeo</div>
+    </div>
+    <div style="display:flex;border-top:1px solid var(--border);">
+      <button onclick="openMediaForAdsetDefault(${si})" style="flex:1;padding:.625rem;border:none;background:transparent;color:var(--accent);font-size:.8rem;font-weight:600;cursor:pointer;border-right:1px solid var(--border);">Trocar</button>
+      <button onclick="S.adsetAds[${si}].mediaType='image';S.adsetAds[${si}].videoId='';S.adsetAds[${si}].videoThumb='';S.adsetAds[${si}].videoTitle='';R()" style="flex:1;padding:.625rem;border:none;background:transparent;color:#EF4444;font-size:.8rem;cursor:pointer;">Remover</button>
+    </div>
+  </div>`:isImage?`
+  <div style="border:2px solid #22C55E;border-radius:.75rem;overflow:hidden;">
+    <div style="position:relative;"><img src="${c.imageUrl}" style="width:100%;height:160px;object-fit:cover;display:block;" onerror="this.style.display='none'"/>
+      <div style="position:absolute;top:8px;left:8px;background:#22C55E;color:white;font-size:.7rem;padding:2px 8px;border-radius:99px;font-weight:700;">✓ Imagem</div>
+    </div>
+    <div style="display:flex;border-top:1px solid var(--border);">
+      <button onclick="openMediaForAdsetDefault(${si})" style="flex:1;padding:.625rem;border:none;background:transparent;color:var(--accent);font-size:.8rem;font-weight:600;cursor:pointer;border-right:1px solid var(--border);">Trocar</button>
+      <button onclick="S.adsetAds[${si}].imageUrl='';S.adsetAds[${si}].imageHash='';R()" style="flex:1;padding:.625rem;border:none;background:transparent;color:#EF4444;font-size:.8rem;cursor:pointer;">Remover</button>
+    </div>
+  </div>`:`
+  <button onclick="openMediaForAdsetDefault(${si})" style="width:100%;border:2px dashed var(--border);border-radius:.75rem;padding:2.5rem;display:flex;flex-direction:column;align-items:center;gap:.5rem;background:var(--bg-card);cursor:pointer;" onmouseover="this.style.borderColor='#1a2440'" onmouseout="this.style.borderColor='var(--border)'">
+    <span style="font-size:2rem;">📁</span><p style="font-weight:600;color:var(--text-secondary);margin:0;font-size:.875rem;">Abrir Biblioteca de Mídia</p>
+    <p style="color:var(--text-muted);margin:0;font-size:.75rem;">${da.videoId||da.imageUrl?'Ou deixe vazio para usar a mídia global':'Imagem ou vídeo'}</p>
+  </button>`);
+
+  // ── Copy Padrão do conjunto ──
+  const copyCard=card('Copy Padrão do Conjunto','Texto e headline para este conjunto (vazio = usa global)',`
+  <div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.375rem;">
+      <label style="font-size:.7rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;">Texto Principal</label>
+      <button onclick="S.adsetAds[${si}].primaryTexts=[...S.adsetAds[${si}].primaryTexts,''];R()" style="font-size:.75rem;color:var(--accent);background:transparent;border:none;cursor:pointer;font-weight:600;">+ Variação</button>
+    </div>
+    ${c.primaryTexts.map((t,i)=>`
+    <div style="display:flex;gap:.5rem;margin-bottom:.5rem;">
+      <textarea id="adset-${si}-pt-${i}" oninput="S.adsetAds[${si}].primaryTexts[${i}]=this.value"
+        style="flex:1;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.875rem;outline:none;resize:none;min-height:60px;background:var(--bg-card);color:var(--text-primary);"
+        onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'" placeholder="${i===0&&da.primaryTexts?.[0]?'↳ Padrão: '+esc(da.primaryTexts[0]).slice(0,60):'Texto principal...'}">${esc(t)}</textarea>
+      ${c.primaryTexts.length>1?`<button onclick="S.adsetAds[${si}].primaryTexts=S.adsetAds[${si}].primaryTexts.filter((_,j)=>j!==${i});R()" style="color:#EF4444;background:transparent;border:none;cursor:pointer;font-size:1.25rem;align-self:start;padding-top:4px;">×</button>`:''}
+    </div>`).join('')}
+  </div>
+  <div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.375rem;">
+      <label style="font-size:.7rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;">Headline</label>
+      <button onclick="S.adsetAds[${si}].headlines=[...S.adsetAds[${si}].headlines,''];R()" style="font-size:.75rem;color:var(--accent);background:transparent;border:none;cursor:pointer;font-weight:600;">+ Variação</button>
+    </div>
+    ${c.headlines.map((t,i)=>`
+    <div style="display:flex;gap:.5rem;margin-bottom:.5rem;">
+      <input id="adset-${si}-hl-${i}" value="${esc(t)}" oninput="S.adsetAds[${si}].headlines[${i}]=this.value"
+        style="flex:1;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.875rem;outline:none;background:var(--bg-card);color:var(--text-primary);"
+        onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'" placeholder="${i===0&&da.headlines?.[0]?'↳ Padrão: '+esc(da.headlines[0]).slice(0,60):'Headline'}"/>
+      ${c.headlines.length>1?`<button onclick="S.adsetAds[${si}].headlines=S.adsetAds[${si}].headlines.filter((_,j)=>j!==${i});R()" style="color:#EF4444;background:transparent;border:none;cursor:pointer;font-size:1.25rem;align-self:center;">×</button>`:''}
+    </div>`).join('')}
+  </div>`);
+
+  // ── Anúncios por Conjunto (quando na > 1) — igual adLevelCard do renderS3 ──
+  let adLevelCardLocal='';
+  if(S.na>1){
+    // Resize arrays if na changed
+    if(c.adCreatives.length!==S.na)c.adCreatives=Array.from({length:S.na},(_,i)=>c.adCreatives[i]||null);
+    if(c.adCopies.length!==S.na)c.adCopies=Array.from({length:S.na},(_,i)=>c.adCopies[i]||{primaryText:'',headline:''});
+    const adMediaM=c.adMediaMode||'single', adCopyM=c.adCopyMode||'single';
+    const adAssigned=c.adCreatives.filter(x=>x).length;
+
+    adLevelCardLocal=`<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:.75rem;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);margin-bottom:1rem;">
+      <div style="padding:.875rem 1.25rem;border-bottom:1px solid var(--border);background:var(--border-light);">
+        <p style="font-weight:600;font-size:.875rem;color:var(--text-primary);margin:0;">Anúncios do Conjunto ${si+1} (${S.na} anúncios)</p>
+        <p style="font-size:.7rem;color:var(--text-muted);margin:.125rem 0 0;">Como a mídia e copy serão distribuídas entre os ${S.na} anúncios deste conjunto</p>
+      </div>
+      <div style="padding:1rem;">
+        <p style="font-size:.7rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;margin:0 0 .5rem;">Mídia por Anúncio</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;">
+          <button onclick="S.adsetAds[${si}].adMediaMode='single';R()" style="padding:.625rem;border-radius:.5rem;border:2px solid ${adMediaM==='single'?'#1a2440':'var(--border)'};background:${adMediaM==='single'?'rgba(215,250,0,.15)':'var(--bg-card)'};cursor:pointer;text-align:left;">
+            <p style="font-size:.75rem;font-weight:700;color:#1a2440;margin:0;">📌 Mesmo criativo</p>
+            <p style="font-size:.65rem;color:var(--text-secondary);margin:.125rem 0 0;">Todos os ${S.na} anúncios usam a mesma mídia (do card acima)</p>
+          </button>
+          <button onclick="S.adsetAds[${si}].adMediaMode='per_ad';S.adsetAds[${si}].adCreatives=Array.from({length:S.na},(_,i)=>S.adsetAds[${si}].adCreatives[i]||null);R()" style="padding:.625rem;border-radius:.5rem;border:2px solid ${adMediaM==='per_ad'?'#1a2440':'var(--border)'};background:${adMediaM==='per_ad'?'rgba(215,250,0,.15)':'var(--bg-card)'};cursor:pointer;text-align:left;">
+            <p style="font-size:.75rem;font-weight:700;color:#1a2440;margin:0;">🎨 Criativo diferente</p>
+            <p style="font-size:.65rem;color:var(--text-secondary);margin:.125rem 0 0;">1 mídia diferente por anúncio</p>
+          </button>
         </div>
-        <div style="display:grid;grid-template-columns:88px 1fr;gap:.625rem;">
-          <div>
-            ${has?`<div style="position:relative;">
-              ${ad.videoThumb?`<img src="${ad.videoThumb}" onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;object-fit:cover;border-radius:.5rem;border:2px solid var(--border-light);cursor:pointer;"/>`:
-                ad.imageUrl?`<img src="${ad.imageUrl}" onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;object-fit:cover;border-radius:.5rem;border:2px solid var(--border-light);cursor:pointer;" onerror="this.style.display='none'"/>`:
-                `<div onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;background:var(--border-light);border-radius:.5rem;display:flex;align-items:center;justify-content:center;font-size:1.5rem;cursor:pointer;">🎬</div>`}
-              <button onclick="S.adsetAds[${si}].ads[${ai}].videoId='';S.adsetAds[${si}].ads[${ai}].videoThumb='';S.adsetAds[${si}].ads[${ai}].imageUrl='';S.adsetAds[${si}].ads[${ai}].imageHash='';R()" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;background:#EF4444;border:none;border-radius:50%;color:white;font-size:.625rem;cursor:pointer;">×</button>
-            </div>`:`
-            <button onclick="openMediaForAdsetAd(${si},${ai})" style="width:88px;height:88px;border:1.5px dashed var(--border);border-radius:.5rem;background:var(--bg-card);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.125rem;cursor:pointer;">
-              <span style="font-size:1.25rem;">📁</span>
-              <span style="font-size:.55rem;color:var(--text-muted);font-weight:600;">Mídia</span>
-            </button>`}
+        ${adMediaM==='per_ad'?`
+        <button onclick="openMediaForAdsetAds(${si})" style="width:100%;padding:.625rem;border:2px dashed ${adAssigned?'var(--border-light)':'var(--border)'};border-radius:.625rem;background:${adAssigned?'rgba(215,250,0,.1)':'var(--bg-card)'};color:${adAssigned?'#1a2440':'var(--text-secondary)'};font-weight:700;font-size:.75rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.5rem;margin-bottom:.5rem;">📁 Selecionar ${S.na} mídias de uma vez</button>
+        ${adAssigned?`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.375rem;">
+          <span style="font-size:.65rem;color:var(--text-secondary);">${adAssigned}/${S.na} atribuídos</span>
+          <button onclick="S.adsetAds[${si}].adCreatives=Array.from({length:S.na},()=>null);R()" style="font-size:.65rem;color:#EF4444;background:transparent;border:none;cursor:pointer;">Limpar</button>
+        </div>`:''}
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:.375rem;">
+          ${Array.from({length:S.na},(_,ai)=>{
+            const ac=c.adCreatives[ai];const has=ac&&(ac.videoId||ac.imageUrl||ac.imageHash);
+            return `<div style="border:1.5px solid ${has?'var(--border-light)':'var(--border)'};border-radius:.5rem;overflow:hidden;">
+              <div onclick="openMediaForAdsetIndexAd(${si},${ai})" style="height:48px;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;">
+                ${has&&ac.videoThumb?`<img src="${ac.videoThumb}" style="width:100%;height:100%;object-fit:cover;"/>`:has&&ac.imageUrl?`<img src="${ac.imageUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:has?'<span style="font-size:1rem;">🎬</span>':'<span style="color:var(--text-muted);">+</span>'}
+              </div>
+              <p style="font-size:.5rem;font-weight:700;color:${has?'#1a2440':'var(--text-muted)'};margin:0;text-align:center;padding:.125rem;">Ad ${ai+1}</p>
+            </div>`;
+          }).join('')}
+        </div>`:''}
+      </div>
+      <div style="padding:0 1rem 1rem;">
+        <div style="border-top:1px solid var(--border);padding-top:.75rem;">
+          <p style="font-size:.7rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;margin:0 0 .5rem;">Copy por Anúncio</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;">
+            <button onclick="S.adsetAds[${si}].adCopyMode='single';R()" style="padding:.625rem;border-radius:.5rem;border:2px solid ${adCopyM==='single'?'#1a2440':'var(--border)'};background:${adCopyM==='single'?'rgba(215,250,0,.15)':'var(--bg-card)'};cursor:pointer;text-align:left;">
+              <p style="font-size:.75rem;font-weight:700;color:#1a2440;margin:0;">📌 Mesmo texto</p>
+              <p style="font-size:.65rem;color:var(--text-secondary);margin:.125rem 0 0;">Usa o texto/headline do card acima</p>
+            </button>
+            <button onclick="S.adsetAds[${si}].adCopyMode='per_ad';S.adsetAds[${si}].adCopies=Array.from({length:S.na},(_,i)=>S.adsetAds[${si}].adCopies[i]||{primaryText:'',headline:''});R()" style="padding:.625rem;border-radius:.5rem;border:2px solid ${adCopyM==='per_ad'?'#1a2440':'var(--border)'};background:${adCopyM==='per_ad'?'rgba(215,250,0,.15)':'var(--bg-card)'};cursor:pointer;text-align:left;">
+              <p style="font-size:.75rem;font-weight:700;color:#1a2440;margin:0;">✏️ Texto diferente</p>
+              <p style="font-size:.65rem;color:var(--text-secondary);margin:.125rem 0 0;">Texto e headline por anúncio</p>
+            </button>
           </div>
-          <div style="display:flex;flex-direction:column;gap:.375rem;">
-            <textarea id="adset-${si}-ad-${ai}-pt" oninput="S.adsetAds[${si}].ads[${ai}].primaryText=this.value" placeholder="Texto principal (vazio = usa global)"
-              style="width:100%;border:1.5px solid var(--border);border-radius:.375rem;padding:.375rem .5rem;font-size:.75rem;outline:none;resize:none;min-height:42px;"
-              onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'">${esc(ad.primaryText||'')}</textarea>
-            <input id="adset-${si}-ad-${ai}-hl" value="${esc(ad.headline||'')}" oninput="S.adsetAds[${si}].ads[${ai}].headline=this.value" placeholder="Headline (vazio = usa global)"
-              style="width:100%;border:1.5px solid var(--border);border-radius:.375rem;padding:.375rem .5rem;font-size:.75rem;outline:none;"
-              onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'"/>
-          </div>
+          ${adCopyM==='per_ad'?`<div style="display:flex;flex-direction:column;gap:.5rem;max-height:280px;overflow-y:auto;">
+            ${Array.from({length:S.na},(_,ai)=>{
+              const cp=c.adCopies[ai]||{primaryText:'',headline:''};
+              return `<div style="border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem;">
+                <div style="display:flex;align-items:center;gap:.375rem;margin-bottom:.375rem;">
+                  <span style="font-size:.6rem;font-weight:700;background:rgba(215,250,0,.15);color:#1a2440;padding:.125rem .375rem;border-radius:99px;">Ad ${ai+1}</span>
+                </div>
+                <textarea id="adset-${si}-adcp-${ai}-pt" oninput="if(!S.adsetAds[${si}].adCopies[${ai}])S.adsetAds[${si}].adCopies[${ai}]={primaryText:'',headline:''};S.adsetAds[${si}].adCopies[${ai}].primaryText=this.value"
+                  style="width:100%;border:1px solid var(--border);border-radius:.375rem;padding:.375rem .5rem;font-size:.75rem;outline:none;resize:none;height:50px;margin-bottom:.25rem;background:var(--bg-card);color:var(--text-primary);"
+                  onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'" placeholder="Texto principal...">${esc(cp.primaryText)}</textarea>
+                <input id="adset-${si}-adcp-${ai}-hl" value="${esc(cp.headline)}" oninput="if(!S.adsetAds[${si}].adCopies[${ai}])S.adsetAds[${si}].adCopies[${ai}]={primaryText:'',headline:''};S.adsetAds[${si}].adCopies[${ai}].headline=this.value"
+                  style="width:100%;border:1px solid var(--border);border-radius:.375rem;padding:.375rem .5rem;font-size:.75rem;outline:none;background:var(--bg-card);color:var(--text-primary);"
+                  onfocus="this.style.borderColor='#1a2440'" onblur="this.style.borderColor='var(--border)'" placeholder="Headline..."/>
+              </div>`;
+            }).join('')}
+          </div>`:''}
         </div>
-      </div>`;
-    }).join('')}
-  </div>`)}
-  <div style="background:var(--border-light);border:1px solid var(--border);border-radius:.625rem;padding:.75rem;font-size:.7rem;color:var(--text-secondary);">
-    <strong>💡 Dica:</strong> Texto e mídia vazios usam o valor global definido na campanha. A página do FB, URL de destino e CTA são herdados das configurações globais (definidas na primeira janela de anúncio).
-  </div>`;
+      </div>
+    </div>`;
+  }
+
+  return headerBar+pageCard+globalCard+mediaCard+copyCard+adLevelCardLocal;
 }
 
 function renderS4() {
@@ -2280,14 +2432,26 @@ function openMediaForCampAdsetAd(ci,si,ai) {
 }
 // Modo editAdsPerAdset: um conjunto tem N anúncios editáveis
 function openMediaForAdsetAds(si){
-  // Bulk selecionar N mídias para o conjunto si
+  // Bulk N mídias distribuídas em adCreatives do conjunto si
   S.mediaSelectTarget={type:'adset_ads_bulk',si};
   mediaFolder=null;mediaSearch='';mediaMultiSelect=true;mediaSelected=[];
   _openMediaModal();
 }
 function openMediaForAdsetAd(si,ai){
-  // Seleção individual da mídia de um anúncio específico
+  // Seleção individual (antigo — mantido para compat)
   S.mediaSelectTarget={type:'adset_ad',si,ai};
+  mediaFolder=null;mediaSearch='';mediaMultiSelect=false;mediaSelected=[];
+  _openMediaModal();
+}
+function openMediaForAdsetDefault(si){
+  // Mídia padrão do conjunto (grava em S.adsetAds[si] direto)
+  S.mediaSelectTarget={type:'adset_default',si};
+  mediaFolder=null;mediaSearch='';mediaMultiSelect=false;mediaSelected=[];
+  _openMediaModal();
+}
+function openMediaForAdsetIndexAd(si,ai){
+  // Mídia de um anúncio específico no adCreatives do conjunto si
+  S.mediaSelectTarget={type:'adset_adcr',si,ai};
   mediaFolder=null;mediaSearch='';mediaMultiSelect=false;mediaSelected=[];
   _openMediaModal();
 }
@@ -2332,15 +2496,11 @@ function confirmMultiSelect() {
     }
     closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.na} anúncios do Conj. ${si+1}`,'success');R();
   } else if(target&&typeof target==='object'&&target.type==='adset_ads_bulk'){
-    // Modo editAdsPerAdset: bulk nos N anúncios do conjunto si
-    const si=target.si;
-    if(!S.adsetAds[si])S.adsetAds[si]={ads:[],pageId:'',pageName:''};
-    S.adsetAds[si].ads=Array.from({length:S.na},(_,ai)=>{
+    // Modo editAdsPerAdset: bulk nos adCreatives[ai] do conjunto si
+    const si=target.si;ensureAdsetAds(si);
+    S.adsetAds[si].adCreatives=Array.from({length:S.na},(_,ai)=>{
       const m=mediaSelected[ai%mediaSelected.length];
-      const existing=S.adsetAds[si].ads[ai]||{primaryText:'',headline:''};
-      if(!m)return existing;
-      const cr=makeCr(m);
-      return {...existing,...cr};
+      return m?makeCr(m):null;
     });
     closeMedia();toast(`${mediaSelected.length} mídia(s) distribuídas em ${S.na} anúncios do Conj. ${si+1}`,'success');R();
   } else {
@@ -2564,6 +2724,19 @@ function selectMedia(type,id,urlOrThumb,titleOrHash) {
     const ad=S.adsetAds[si].ads[ai];
     if(type==='video'){ad.mediaType='video';ad.videoId=id;ad.videoThumb=urlOrThumb;ad.imageUrl='';ad.imageHash='';}
     else{ad.mediaType='image';ad.imageUrl=urlOrThumb;ad.imageHash=titleOrHash;ad.videoId='';ad.videoThumb='';}
+    S.mediaSelectTarget=null;closeMedia();R();return;
+  }
+  if(target&&typeof target==='object'&&target.type==='adset_default'){
+    const {si}=target;ensureAdsetAds(si);const c=S.adsetAds[si];
+    if(type==='video'){c.mediaType='video';c.videoId=id;c.videoThumb=urlOrThumb;c.videoTitle=titleOrHash;c.imageUrl='';c.imageHash='';}
+    else{c.mediaType='image';c.imageUrl=urlOrThumb;c.imageHash=titleOrHash;c.videoId='';c.videoThumb='';}
+    S.mediaSelectTarget=null;closeMedia();R();return;
+  }
+  if(target&&typeof target==='object'&&target.type==='adset_adcr'){
+    const {si,ai}=target;ensureAdsetAds(si);
+    S.adsetAds[si].adCreatives[ai]=type==='video'
+      ?{mediaType:'video',videoId:id,videoThumb:urlOrThumb,imageUrl:'',imageHash:''}
+      :{mediaType:'image',imageUrl:urlOrThumb,imageHash:titleOrHash,videoId:'',videoThumb:''};
     S.mediaSelectTarget=null;closeMedia();R();return;
   }
   if (target!==null&&typeof target==='number') {
@@ -3109,10 +3282,10 @@ async function startPub(){
     plog('━━ FASE 3/4 — criativos','loading');
     const isFbUrl=u=>!u||u.includes('lookaside.facebook')||u.includes('fbcdn.net')||u.includes('scontent');
 
-    const buildLinkData=(cleanUrl,msg,hl,imgHash,imgUrl)=>{
+    const buildLinkData=(cleanUrl,msg,hl,imgHash,imgUrl,ctaOverride)=>{
       const ld={link:cleanUrl};
       if(msg)ld.message=msg;if(hl)ld.name=hl;
-      ld.call_to_action={type:da.cta,value:{link:cleanUrl}};
+      ld.call_to_action={type:ctaOverride||da.cta,value:{link:cleanUrl}};
       if(imgHash)ld.image_hash=imgHash;
       else if(imgUrl&&!isFbUrl(imgUrl))ld.picture=imgUrl;
       return ld;
@@ -3120,7 +3293,11 @@ async function startPub(){
 
     // Pre-fetch video thumbnails for all unique video IDs used
     const adsetAdsVids=[];
-    Object.values(S.adsetAds||{}).forEach(c=>(c?.ads||[]).forEach(a=>{if(a?.videoId)adsetAdsVids.push(a.videoId);}));
+    Object.values(S.adsetAds||{}).forEach(c=>{
+      if(c?.videoId)adsetAdsVids.push(c.videoId);
+      (c?.adCreatives||[]).forEach(a=>{if(a?.videoId)adsetAdsVids.push(a.videoId);});
+      (c?.ads||[]).forEach(a=>{if(a?.videoId)adsetAdsVids.push(a.videoId);});
+    });
     const allVideoIds=[...new Set([da.videoId,...(S.campaignCreatives||[]).map(c=>c?.videoId),...(S.adsetCreatives||[]).map(c=>c?.videoId),...(S.adCreatives||[]).map(c=>c?.videoId),...Object.values(S.campAdsetCreatives||{}).map(c=>c?.videoId),...adsetAdsVids].filter(Boolean))];
     const videoThumbs={};
     if(allVideoIds.length){
@@ -3141,40 +3318,47 @@ async function startPub(){
       const adCount=(perAdMedia||perAdCopy||matrixPerAd||editPerAdset)?na:1;
 
       for(let a=0;a<adCount;a++){
-        // Modo editPerAdset: lê de S.adsetAds[si]
+        // Modo editPerAdset: state completo em S.adsetAds[si]
         const adsetConf=editPerAdset?S.adsetAds[si]:null;
-        const adFromConf=adsetConf?.ads?.[a];
+        const asAdCr=adsetConf?.adCreatives?.[a]; // mídia por anúncio (dentro do conjunto)
+        const asAdCp=adsetConf?.adCopies?.[a];    // copy por anúncio (dentro do conjunto)
         // Resolve matrix cell per ad when applicable
         const matrixCr=mode==='per_campaign_adset'
           ? (matrixPerAd ? S.campAdsetCreatives[`${ci}_${si}_${a}`] : S.campAdsetCreatives[`${ci}_${si}`])
           : null;
         const campCr=mode==='per_campaign'?S.campaignCreatives[ci]:mode==='per_adset'?S.adsetCreatives[si]:matrixCr;
-        // editPerAdset override de página, depois per_campaign, depois global
+
+        // Effective values — hierarquia: ad-level override > adset-level override > campaign/mode override > global
         const effPageId=(adsetConf?.pageId)||(S.pageMode==='per_campaign'&&S.campaignPages[ci])||da.pageId;
-        // Media: editPerAdset > per-ad > campaign/adset > global
+        const effLinkUrl=adsetConf?.linkUrl||da.linkUrl;
+        const effCta=adsetConf?.cta||da.cta;
+        const effUrlParams=(adsetConf?.urlParams&&adsetConf.urlParams.trim())?adsetConf.urlParams.trim():(da.urlParams&&da.urlParams.trim()?da.urlParams.trim():'');
+        const effName=adsetConf?.name||da.name;
+
+        // Media hierarchy: per-ad of conjunto > mídia padrão do conjunto > per-ad global > campaign/adset > global
         const adCr=perAdMedia?S.adCreatives[a]:null;
-        const effHash=adFromConf?.imageHash||adCr?.imageHash||campCr?.imageHash||da.imageHash;
-        const effImgUrl=adFromConf?.imageUrl||adCr?.imageUrl||campCr?.imageUrl||da.imageUrl;
-        const effVideoId=adFromConf?.videoId||adCr?.videoId||campCr?.videoId||da.videoId;
-        const effVideoThumb=adFromConf?.videoThumb||adCr?.videoThumb||campCr?.videoThumb||da.videoThumb||videoThumbs[effVideoId]||'';
-        // Copy: editPerAdset > per-ad > campaign > global
+        const effHash=asAdCr?.imageHash||adsetConf?.imageHash||adCr?.imageHash||campCr?.imageHash||da.imageHash;
+        const effImgUrl=asAdCr?.imageUrl||adsetConf?.imageUrl||adCr?.imageUrl||campCr?.imageUrl||da.imageUrl;
+        const effVideoId=asAdCr?.videoId||adsetConf?.videoId||adCr?.videoId||campCr?.videoId||da.videoId;
+        const effVideoThumb=asAdCr?.videoThumb||adsetConf?.videoThumb||adCr?.videoThumb||campCr?.videoThumb||da.videoThumb||videoThumbs[effVideoId]||'';
+        // Copy hierarchy
         const adCp=perAdCopy?S.adCopies[a]:null;
-        const effMsg=(adFromConf?.primaryText?.trim())||(adCp?.primaryText?.trim())||(campCr?.primaryText?.trim())||(da.primaryTexts[0]||'').trim();
-        const effHl=(adFromConf?.headline?.trim())||(adCp?.headline?.trim())||(campCr?.headline?.trim())||(da.headlines[0]||'').trim();
+        const effMsg=(asAdCp?.primaryText?.trim())||(adsetConf?.primaryTexts?.[0]?.trim())||(adCp?.primaryText?.trim())||(campCr?.primaryText?.trim())||(da.primaryTexts[0]||'').trim();
+        const effHl=(asAdCp?.headline?.trim())||(adsetConf?.headlines?.[0]?.trim())||(adCp?.headline?.trim())||(campCr?.headline?.trim())||(da.headlines[0]||'').trim();
 
         let spec;
         if(effVideoId){
-          const vd={video_id:effVideoId,call_to_action:{type:da.cta,value:{link:cleanUrl}}};
+          const vd={video_id:effVideoId,call_to_action:{type:effCta,value:{link:effLinkUrl}}};
           if(effMsg)vd.message=effMsg;if(effHl)vd.title=effHl;
           if(effVideoThumb)vd.image_url=effVideoThumb;
           spec={page_id:effPageId,video_data:vd};
         }else{
-          spec={page_id:effPageId,link_data:buildLinkData(cleanUrl,effMsg,effHl,effHash,effImgUrl)};
+          spec={page_id:effPageId,link_data:buildLinkData(effLinkUrl,effMsg,effHl,effHash,effImgUrl,effCta)};
         }
 
         if(crq.length===0)plog(`  📋 Spec[0]: ${JSON.stringify(spec).slice(0,200)}…`,'info');
         const creativeBody={name:`Creative_C${ci+1}S${si+1}${adCount>1?'A'+(a+1):''}`.slice(0,255),object_story_spec:spec};
-        if(da.urlParams&&da.urlParams.trim())creativeBody.url_tags=da.urlParams.trim();
+        if(effUrlParams)creativeBody.url_tags=effUrlParams;
         crq.push({method:'POST',relative_url:`${S.selectedAccount.id}/adcreatives`,body:encodeBody(creativeBody)});
         crm.push({ai:i,ci,si,adIdx:a});
       }
