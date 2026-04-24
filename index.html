@@ -1638,6 +1638,27 @@ function renderS3(adsetIdx=-1) {
 }
 
 // Inicializa S.adsetAds[si] com estrutura completa (igual a S.da + extras de ad)
+// Copia seletivamente do primeiro conjunto (si=0) para o conjunto `target`
+function copyFromFirstAdset(target,section){
+  if(target<=0)return;
+  ensureAdsetAds(0);ensureAdsetAds(target);
+  const src=S.adsetAds[0],dst=S.adsetAds[target];
+  if(section==='page'){
+    dst.pageId=src.pageId;dst.pageName=src.pageName;
+    toast('Página do Conj. 1 copiada','success',2000);
+  } else if(section==='config'){
+    dst.linkUrl=src.linkUrl;dst.urlParams=src.urlParams;dst.name=src.name;dst.cta=src.cta;
+    toast('Configurações do Conj. 1 copiadas','success',2000);
+  } else if(section==='copy'){
+    dst.primaryTexts=JSON.parse(JSON.stringify(src.primaryTexts||['']));
+    dst.headlines=JSON.parse(JSON.stringify(src.headlines||['']));
+    dst.adCopyMode=src.adCopyMode;
+    dst.adCopies=JSON.parse(JSON.stringify(src.adCopies||[]));
+    toast('Copy do Conj. 1 copiada','success',2000);
+  }
+  R();
+}
+
 function ensureAdsetAds(si){
   if(!S.adsetAds[si]){
     S.adsetAds[si]={
@@ -1701,8 +1722,14 @@ function renderS3ForAdset(si){
     ${copyFromAdset}
   </div>`;
 
+  // ── Botões "Copiar do Conj. 1" (só aparecem quando si > 0) ──
+  const copyBtnPage=si>0?`<button onclick="copyFromFirstAdset(${si},'page')" style="padding:.375rem .75rem;background:rgba(215,250,0,.15);color:#1a2440;border:1.5px solid var(--border-light);border-radius:.5rem;font-size:.7rem;font-weight:700;cursor:pointer;margin-bottom:.625rem;">📋 Copiar página do Conj. 1</button>`:'';
+  const copyBtnConfig=si>0?`<button onclick="copyFromFirstAdset(${si},'config')" style="padding:.375rem .75rem;background:rgba(215,250,0,.15);color:#1a2440;border:1.5px solid var(--border-light);border-radius:.5rem;font-size:.7rem;font-weight:700;cursor:pointer;margin-bottom:.625rem;">📋 Copiar configurações do Conj. 1</button>`:'';
+  const copyBtnCopy=si>0?`<button onclick="copyFromFirstAdset(${si},'copy')" style="padding:.375rem .75rem;background:rgba(215,250,0,.15);color:#1a2440;border:1.5px solid var(--border-light);border-radius:.5rem;font-size:.7rem;font-weight:700;cursor:pointer;margin-bottom:.625rem;">📋 Copiar copy do Conj. 1</button>`:'';
+
   // ── Página do Facebook (igual renderS3 mas gravando em S.adsetAds[si]) ──
   const pageCard=card('Página do Facebook','Página específica deste conjunto (vazio = usa global)',`
+  ${copyBtnPage}
   ${S.pages.length?`
   <select onchange="const p=S.pages.find(x=>x.id===this.value);S.adsetAds[${si}].pageId=this.value;S.adsetAds[${si}].pageName=p?p.name:'';R()"
     style="width:100%;border:1.5px solid var(--border);border-radius:.5rem;padding:.625rem .75rem;font-size:.875rem;outline:none;background:var(--bg-card);">
@@ -1716,6 +1743,7 @@ function renderS3ForAdset(si){
 
   // ── Configurações Globais do conjunto (URL destino, nome, CTA, URL params) ──
   const globalCard=card('Configurações do Conjunto','URL, nome e CTA deste conjunto (vazio = usa global)',`
+  ${copyBtnConfig}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:.875rem;">
     <div>
       <label style="display:block;font-size:.65rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.375rem;">URL de destino</label>
@@ -1751,6 +1779,7 @@ function renderS3ForAdset(si){
 
   // ── Copy Padrão do conjunto ──
   const copyCard=card('Copy Padrão do Conjunto','Texto e headline para este conjunto (vazio = usa global)',`
+  ${copyBtnCopy}
   <div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.375rem;">
       <label style="font-size:.7rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;">Texto Principal</label>
@@ -2854,8 +2883,23 @@ function validateStepType(info){
     }
   }
   if(info.type==='anuncio'){
-    // Valida config global da primeira janela
-    if(info.adsetIdx<=0){
+    if(S.editAdsPerAdset&&S.ns>1){
+      // Modo por conjunto: valida APENAS o conjunto atual
+      const si=info.adsetIdx;
+      const c=S.adsetAds[si]||{};
+      // Página: aceita do conjunto OU global OU por_campaign
+      const pageOk=c.pageId||S.da.pageId||(S.pageMode==='per_campaign'&&S.nc>1&&S.campaignPages.some(p=>p));
+      if(!pageOk)errs.push('Conj. '+(si+1)+': selecione uma Página (ou defina uma padrão global).');
+      // URL: aceita do conjunto OU global
+      const url=c.linkUrl||S.da.linkUrl;
+      if(!url||!url.startsWith('http'))errs.push('Conj. '+(si+1)+': URL de destino inválida.');
+      // Texto: aceita do conjunto OU global
+      const hasTextInAdset=(c.primaryTexts||[]).some(t=>t&&t.trim());
+      const hasTextInAdAds=(c.adCopyMode==='per_ad')&&(c.adCopies||[]).some(a=>a&&a.primaryText&&a.primaryText.trim());
+      const hasTextGlobal=S.da.primaryTexts.some(t=>t&&t.trim());
+      if(!hasTextInAdset&&!hasTextInAdAds&&!hasTextGlobal)errs.push('Conj. '+(si+1)+': pelo menos um texto principal é obrigatório.');
+    } else {
+      // Modo padrão: valida globals
       if(S.pageMode==='per_campaign'&&S.nc>1){
         const hasAny=S.campaignPages.some(p=>p)||S.da.pageId;
         if(!hasAny)errs.push('Selecione pelo menos uma página (padrão ou por campanha).');
